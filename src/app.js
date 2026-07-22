@@ -1,5 +1,6 @@
 import express from "express";
 import dotenv from "dotenv";
+import cors from "cors";
 import helmet from "helmet";
 import morgan from "morgan";
 import cookieParser from "cookie-parser";
@@ -53,6 +54,7 @@ app.use((req, res, next) => {
   express.urlencoded({ extended: false })(req, res, next);
 });
 app.use(cookieParser());
+app.use(cors({ origin: "https://kynq.in", credentials: true }));
 app.use(helmet());
 
 if (process.env.NODE_ENV === "development") {
