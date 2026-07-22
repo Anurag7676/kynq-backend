@@ -5,11 +5,12 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "start": "node src/gift/server.js",
-    "dev": "node --watch src/gift/server.js",
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "start:gift": "node src/gift/server.js",
+    "dev:gift": "node --watch src/gift/server.js",
     "test": "echo \"Error: no test specified\" && exit 1",
-    "check-tax": "node check-stripe-tax-config.js",
-    "start:furniture": "node src/server.js"
+    "check-tax": "node check-stripe-tax-config.js"
   },
   "keywords": [],
   "author": "",
@@ -24,6 +25,7 @@
     "csv-parser": "^3.2.0",
     "dotenv": "^16.5.0",
     "express": "^5.1.0",
+    "express-rate-limit": "^8.6.0",
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.13.2",

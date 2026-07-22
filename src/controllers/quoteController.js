@@ -704,7 +704,7 @@ const getQuoteRequestStats = async (req, res) => {
           contacted: stat.contacted,
           completed: stat.completed
         })),
-        topRequestedProducts,
+        topRequestedProducts: topProducts,
         recentActivity: recentActivity.map(quote => ({
           id: quote._id,
           customer: `${quote.firstName} ${quote.lastName}`,

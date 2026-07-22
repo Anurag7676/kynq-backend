@@ -29,6 +29,8 @@ import quoteRoutes from "./routes/quoteRoutes.js";
 import projectRoutes from "./routes/projectRoutes.js";
 import productExportRoutes from "./routes/productExportRoutes.js";
 import mlmRoutes from "./routes/mlmRoutes.js";
+import editorRoutes from "./routes/editorRoutes.js";
+import rateLimit from "express-rate-limit";
 
 
 dotenv.config();
@@ -61,28 +63,47 @@ if (process.env.NODE_ENV === "development") {
   app.use(morgan("dev"));
 }
 
+// Rate limiters
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  message: { success: false, message: "Too many attempts, please try again later" },
+});
+
+const generalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 200,
+  message: { success: false, message: "Too many requests, please try again later" },
+});
+
 app.use(express.static(path.join(__dirname, "../public")));
 
 // API Routes
-app.use("/api/admin", adminRoutes);
-app.use("/api/users", userRoutes);
-app.use("/api/products", productRoutes);
-app.use("/api/categories", categoryRoutes);
-app.use("/api/blogs", blogRoutes);
-app.use("/api/cart", cartRoutes);
-app.use("/api/wishlist", wishlistRoutes);
-app.use("/api/orders", orderRoutes);
-app.use("/api/payments", paymentRoutes);
-app.use("/api/shipping", shippingRoutes); // ADD THIS LINE
-app.use("/api/content", contentRoutes);
-app.use("/api/homepage", homepageRoutes);
-app.use("/api/contact", contactRoutes);
-app.use("/api/bulk-upload", bulkUploadRoutes);
-app.use("/api/dashboard", dashboardRoutes);
-app.use("/api/quotes", quoteRoutes);
-app.use("/api/projects", projectRoutes);
-app.use("/api/products/export", productExportRoutes);
-app.use("/api/mlm", mlmRoutes);
+app.use("/api/admin", authLimiter, adminRoutes);
+app.use("/api/users", authLimiter, userRoutes);
+app.use("/api/products", generalLimiter, productRoutes);
+app.use("/api/categories", generalLimiter, categoryRoutes);
+app.use("/api/blogs", generalLimiter, blogRoutes);
+app.use("/api/cart", generalLimiter, cartRoutes);
+app.use("/api/wishlist", generalLimiter, wishlistRoutes);
+app.use("/api/orders", generalLimiter, orderRoutes);
+app.use("/api/payments", authLimiter, paymentRoutes);
+app.use("/api/shipping", generalLimiter, shippingRoutes);
+app.use("/api/content", generalLimiter, contentRoutes);
+app.use("/api/homepage", generalLimiter, homepageRoutes);
+app.use("/api/contact", authLimiter, contactRoutes);
+app.use("/api/bulk-upload", generalLimiter, bulkUploadRoutes);
+app.use("/api/dashboard", generalLimiter, dashboardRoutes);
+app.use("/api/quotes", generalLimiter, quoteRoutes);
+app.use("/api/projects", generalLimiter, projectRoutes);
+app.use("/api/products/export", generalLimiter, productExportRoutes);
+app.use("/api/mlm", generalLimiter, mlmRoutes);
+app.use("/api/editors", authLimiter, editorRoutes);
+
+// Health check
+app.get("/api/health", (req, res) => {
+  res.json({ status: "ok", timestamp: new Date().toISOString() });
+});
 
 
 app.get("/", (req, res) => {

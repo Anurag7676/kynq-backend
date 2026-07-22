@@ -27,52 +27,38 @@ const auth = async (req, res, next) => {
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    // Check if it's an Admin first
-    let admin = await Admin.findById(decoded.id).select("-password");
+    // Check all three user types in parallel
+    const [admin, editor, user] = await Promise.all([
+      Admin.findById(decoded.id).select("-password"),
+      Editor.findById(decoded.id).select("-password"),
+      User.findById(decoded.id).select("-password"),
+    ]);
+
     if (admin) {
       req.admin = admin;
       req.userType = "admin";
-      next();
-      return;
+      return next();
     }
 
-    // Check if it's an Editor second
-    let editor = await Editor.findById(decoded.id).select("-password");
     if (editor) {
       if (!editor.isActive) {
-        return res.status(401).json({
-          success: false,
-          message: "Account is deactivated",
-        });
+        return res.status(401).json({ success: false, message: "Account is deactivated" });
       }
-
       req.editor = editor;
       req.userType = "editor";
-      next();
-      return;
+      return next();
     }
 
-    // Check if it's a regular User third
-    const user = await User.findById(decoded.id).select("-password");
     if (user) {
       if (!user.isActive) {
-        return res.status(401).json({
-          success: false,
-          message: "Account is deactivated",
-        });
+        return res.status(401).json({ success: false, message: "Account is deactivated" });
       }
-
       req.user = user;
       req.userType = "user";
-      next();
-      return;
+      return next();
     }
 
-    // If no user found
-    return res.status(401).json({
-      success: false,
-      message: "Not authorized, user not found",
-    });
+    return res.status(401).json({ success: false, message: "Not authorized, user not found" });
 
   } catch (error) {
     return res.status(401).json({
