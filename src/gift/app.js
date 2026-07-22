@@ -1,6 +1,5 @@
 // kynq gift API — clean Express app that replaces the Next.js /api/* routes.
 import express from "express";
-import cors from "cors";
 import helmet from "helmet";
 import morgan from "morgan";
 import cookieParser from "cookie-parser";
@@ -27,9 +26,7 @@ import webhook from "./routes/webhook.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 
-const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:3000";
-app.use(cors({ origin: CLIENT_URL, credentials: true }));
-app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
+app.use(helmet());
 app.use(cookieParser());
 if (process.env.NODE_ENV !== "production") app.use(morgan("dev"));
 
