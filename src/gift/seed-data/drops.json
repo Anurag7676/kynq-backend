@@ -1,0 +1,46 @@
+[
+ {
+  "slug": "golden-hour",
+  "name": "golden hour",
+  "tagline": "a candle + prints, all warm-toned. once they sell, they're gone.",
+  "story": "a tiny collection built around the last hour of a good day. a soy candle poured in small batches — amber, fig, a curl of woodsmoke — and a pair of prints in the same warm light. each candle batch smells a shade different; the pour doesn't repeat.",
+  "opensAt": 1783463399029,
+  "closesAt": 1784932199029,
+  "productSlugs": [
+   "mint-glow-candle",
+   "royal-glow-pillar"
+  ],
+  "status": "live"
+ },
+ {
+  "slug": "monsoon",
+  "name": "monsoon",
+  "tagline": "deep blues, indigo skies, rainy-day picks. dropping when the first rain comes.",
+  "story": "a quiet collection waiting on the weather. when the first real monsoon rain hits, we open the drop. indigo, slate, deep teal. fifteen pieces. you'll know when.",
+  "opensAt": 1788215399029,
+  "productSlugs": [],
+  "status": "upcoming"
+ },
+ {
+  "slug": "winter-23",
+  "name": "winter '23 — wool & smoke",
+  "tagline": "twenty pieces in undyed neutrals and woodsmoke grey. sold out march 2024.",
+  "story": "our first winter collection. twenty pieces, ten in undyed neutrals, ten in woodsmoke grey. it took us six weeks to make. it took six days to sell.",
+  "opensAt": 1742682599029,
+  "closesAt": 1747434599029,
+  "productSlugs": [],
+  "status": "sold-out",
+  "archiveLabel": "march 2024"
+ },
+ {
+  "slug": "summer-23",
+  "name": "summer '23 — sun-bleached",
+  "tagline": "eight pieces, sun-warm tones, palm fronds. sold out july 2023.",
+  "story": "a small run built around three days of goa sun. everything came back a colour we couldn't quite name. eight pieces.",
+  "opensAt": 1727130599029,
+  "closesAt": 1730586599029,
+  "productSlugs": [],
+  "status": "sold-out",
+  "archiveLabel": "july 2023"
+ }
+]

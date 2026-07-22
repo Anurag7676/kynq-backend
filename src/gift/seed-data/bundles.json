@@ -1,0 +1,105 @@
+[
+ {
+  "slug": "new-parents",
+  "name": "the welcome bundle",
+  "occasion": "for new parents",
+  "shortDescription": "a snuggle bunny, a calming candle, and a card you write the words for.",
+  "longDescription": "made for the awkward in-between of 'congrats' and 'i don't know what to bring'. one rainbow snuggle bunny, one lavender haze candle, one hand-written card with whatever you want it to say. everything tucked into a cotton drawstring pouch — ready to gift without wrapping.",
+  "price": 280000,
+  "contents": [
+   {
+    "productSlug": "rainbow-snuggle-bunny",
+    "name": "rainbow snuggle bunny",
+    "quantity": 1
+   },
+   {
+    "productSlug": "lavender-haze-candle",
+    "name": "lavender haze candle",
+    "quantity": 1
+   }
+  ],
+  "wrapOptions": [
+   {
+    "id": "pouch",
+    "label": "cotton drawstring (included)",
+    "priceDelta": 0
+   },
+   {
+    "id": "box",
+    "label": "lined gift box (+₹150)",
+    "priceDelta": 15000
+   }
+  ],
+  "giftMessageMaxLength": 240,
+  "inventory": 8,
+  "leadTimeDays": 3,
+  "tape": "rose"
+ },
+ {
+  "slug": "housewarming",
+  "name": "settle in",
+  "occasion": "for housewarmings",
+  "shortDescription": "a candle trio and an hourglass for the new place.",
+  "longDescription": "for the friend who just moved. an aroma bliss candle trio and a glass hourglass for the new shelf. comes in a cotton drawstring with a hand-written 'happy new home' card. they'll cry. probably.",
+  "price": 410000,
+  "contents": [
+   {
+    "productSlug": "aroma-bliss-trio",
+    "name": "aroma bliss candle trio",
+    "quantity": 1
+   },
+   {
+    "productSlug": "the-hourglass",
+    "name": "the hourglass",
+    "quantity": 1
+   }
+  ],
+  "wrapOptions": [
+   {
+    "id": "pouch",
+    "label": "cotton drawstring (included)",
+    "priceDelta": 0
+   },
+   {
+    "id": "box",
+    "label": "lined gift box (+₹150)",
+    "priceDelta": 15000
+   }
+  ],
+  "giftMessageMaxLength": 240,
+  "inventory": 5,
+  "leadTimeDays": 4,
+  "tape": "kraft"
+ },
+ {
+  "slug": "just-because",
+  "name": "the small joy",
+  "occasion": "just because",
+  "shortDescription": "one rose keychain, a thank-you card, wrapped in cotton ribbon.",
+  "longDescription": "the smallest thing we sell, made for arriving on a tuesday with no occasion. one everbloom rose keychain that never wilts, wrapped in cotton ribbon with a hand-written note that just says hi.",
+  "price": 140000,
+  "contents": [
+   {
+    "productSlug": "everbloom-rose-keychain",
+    "name": "everbloom rose keychain",
+    "quantity": 1
+   }
+  ],
+  "wrapOptions": [
+   {
+    "id": "ribbon",
+    "label": "cotton ribbon (included)",
+    "priceDelta": 0
+   },
+   {
+    "id": "box",
+    "label": "small gift box (+₹100)",
+    "priceDelta": 10000
+   }
+  ],
+  "giftMessageMaxLength": 240,
+  "inventory": 12,
+  "leadTimeDays": 2,
+  "tape": "lavender"
+ }
+]

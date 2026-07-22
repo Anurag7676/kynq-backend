@@ -1,0 +1,1025 @@
+[
+ {
+  "kind": "ready",
+  "id": "p-001",
+  "slug": "rainbow-snuggle-bunny",
+  "name": "rainbow snuggle bunny",
+  "shortDescription": "a squishy rainbow bunny. built for hugging.",
+  "longDescription": "a soft, weighted plush bunny in rainbow pastels. about 30 cm ear to toe. the one that ends up on everyone's bed.",
+  "category": "plushies",
+  "images": [
+   {
+    "url": "/products/rainbow-snuggle-bunny/1.png",
+    "alt": "rainbow snuggle bunny"
+   },
+   {
+    "url": "/products/rainbow-snuggle-bunny/2.png",
+    "alt": "rainbow snuggle bunny"
+   },
+   {
+    "url": "/products/rainbow-snuggle-bunny/3.png",
+    "alt": "rainbow snuggle bunny"
+   },
+   {
+    "url": "/products/rainbow-snuggle-bunny/4.png",
+    "alt": "rainbow snuggle bunny"
+   },
+   {
+    "url": "/products/rainbow-snuggle-bunny/5.png",
+    "alt": "rainbow snuggle bunny"
+   }
+  ],
+  "price": {
+   "amount": 129900,
+   "currency": "INR"
+  },
+  "inventory": 4,
+  "leadTimeDays": 2
+ },
+ {
+  "kind": "ready",
+  "id": "p-002",
+  "slug": "pocket-penguin",
+  "name": "pocket penguin buddy",
+  "shortDescription": "hand-crocheted. fits in a coat pocket.",
+  "longDescription": "a tiny hand-crocheted penguin that rides along in your pocket or clips to a bag. one of one — no two are quite the same.",
+  "category": "plushies",
+  "images": [
+   {
+    "url": "/products/pocket-penguin/1.png",
+    "alt": "pocket penguin buddy"
+   },
+   {
+    "url": "/products/pocket-penguin/2.png",
+    "alt": "pocket penguin buddy"
+   },
+   {
+    "url": "/products/pocket-penguin/3.png",
+    "alt": "pocket penguin buddy"
+   },
+   {
+    "url": "/products/pocket-penguin/4.png",
+    "alt": "pocket penguin buddy"
+   }
+  ],
+  "price": {
+   "amount": 89900,
+   "currency": "INR"
+  },
+  "inventory": 8,
+  "leadTimeDays": 2
+ },
+ {
+  "kind": "ready",
+  "id": "p-003",
+  "slug": "bear-buddies-kit",
+  "name": "bear buddies study kit",
+  "shortDescription": "a plush bear + a whole desk kit.",
+  "longDescription": "a study-buddy set: one soft bear plus a little desk kit of stationery. the gift that makes homework slightly less tragic.",
+  "category": "plushies",
+  "images": [
+   {
+    "url": "/products/bear-buddies-kit/1.png",
+    "alt": "bear buddies study kit"
+   },
+   {
+    "url": "/products/bear-buddies-kit/2.png",
+    "alt": "bear buddies study kit"
+   },
+   {
+    "url": "/products/bear-buddies-kit/3.png",
+    "alt": "bear buddies study kit"
+   },
+   {
+    "url": "/products/bear-buddies-kit/4.png",
+    "alt": "bear buddies study kit"
+   },
+   {
+    "url": "/products/bear-buddies-kit/5.png",
+    "alt": "bear buddies study kit"
+   }
+  ],
+  "price": {
+   "amount": 149900,
+   "currency": "INR"
+  },
+  "inventory": 3,
+  "leadTimeDays": 2
+ },
+ {
+  "kind": "ready",
+  "id": "p-004",
+  "slug": "dino-paint-kit",
+  "name": "dino paint adventure kit",
+  "shortDescription": "paint-your-own dino. mess included.",
+  "longDescription": "a paint-your-own dinosaur kit — figure, brushes, and washable paints. certified rainy-afternoon material.",
+  "category": "plushies",
+  "images": [
+   {
+    "url": "/products/dino-paint-kit/1.png",
+    "alt": "dino paint adventure kit"
+   },
+   {
+    "url": "/products/dino-paint-kit/2.png",
+    "alt": "dino paint adventure kit"
+   },
+   {
+    "url": "/products/dino-paint-kit/3.png",
+    "alt": "dino paint adventure kit"
+   },
+   {
+    "url": "/products/dino-paint-kit/4.png",
+    "alt": "dino paint adventure kit"
+   },
+   {
+    "url": "/products/dino-paint-kit/5.png",
+    "alt": "dino paint adventure kit"
+   }
+  ],
+  "price": {
+   "amount": 129900,
+   "currency": "INR"
+  },
+  "inventory": 5,
+  "leadTimeDays": 2
+ },
+ {
+  "kind": "ready",
+  "id": "p-005",
+  "slug": "happy-monkey-kit",
+  "name": "happy monkey school kit",
+  "shortDescription": "a cheeky monkey + back-to-school bits.",
+  "longDescription": "a plush monkey paired with a back-to-school kit. the first-day-of-term gift that actually gets used.",
+  "category": "plushies",
+  "images": [
+   {
+    "url": "/products/happy-monkey-kit/1.png",
+    "alt": "happy monkey school kit"
+   },
+   {
+    "url": "/products/happy-monkey-kit/2.png",
+    "alt": "happy monkey school kit"
+   },
+   {
+    "url": "/products/happy-monkey-kit/3.png",
+    "alt": "happy monkey school kit"
+   },
+   {
+    "url": "/products/happy-monkey-kit/4.png",
+    "alt": "happy monkey school kit"
+   },
+   {
+    "url": "/products/happy-monkey-kit/5.png",
+    "alt": "happy monkey school kit"
+   }
+  ],
+  "price": {
+   "amount": 139900,
+   "currency": "INR"
+  },
+  "inventory": 10,
+  "leadTimeDays": 2
+ },
+ {
+  "kind": "ready",
+  "id": "p-006",
+  "slug": "aroma-bliss-trio",
+  "name": "aroma bliss candle trio",
+  "shortDescription": "three scents. one very good mood.",
+  "longDescription": "a trio of small-batch soy candles in three moods — fresh, warm, and sweet. hand-poured, 20-hour burn each.",
+  "category": "candles",
+  "images": [
+   {
+    "url": "/products/aroma-bliss-trio/1.png",
+    "alt": "aroma bliss candle trio"
+   },
+   {
+    "url": "/products/aroma-bliss-trio/2.png",
+    "alt": "aroma bliss candle trio"
+   },
+   {
+    "url": "/products/aroma-bliss-trio/3.png",
+    "alt": "aroma bliss candle trio"
+   },
+   {
+    "url": "/products/aroma-bliss-trio/4.png",
+    "alt": "aroma bliss candle trio"
+   },
+   {
+    "url": "/products/aroma-bliss-trio/5.png",
+    "alt": "aroma bliss candle trio"
+   }
+  ],
+  "price": {
+   "amount": 179900,
+   "currency": "INR"
+  },
+  "inventory": 7,
+  "leadTimeDays": 2
+ },
+ {
+  "kind": "ready",
+  "id": "p-007",
+  "slug": "lavender-haze-candle",
+  "name": "lavender haze candle",
+  "shortDescription": "lavender + vanilla. instant calm.",
+  "longDescription": "a soy candle in soft lavender and vanilla. hand-poured in a reusable frosted-glass jar. 40-hour burn.",
+  "category": "candles",
+  "images": [
+   {
+    "url": "/products/lavender-haze-candle/1.png",
+    "alt": "lavender haze candle"
+   },
+   {
+    "url": "/products/lavender-haze-candle/2.png",
+    "alt": "lavender haze candle"
+   },
+   {
+    "url": "/products/lavender-haze-candle/3.png",
+    "alt": "lavender haze candle"
+   },
+   {
+    "url": "/products/lavender-haze-candle/4.png",
+    "alt": "lavender haze candle"
+   },
+   {
+    "url": "/products/lavender-haze-candle/5.png",
+    "alt": "lavender haze candle"
+   }
+  ],
+  "price": {
+   "amount": 89900,
+   "currency": "INR"
+  },
+  "inventory": 2,
+  "leadTimeDays": 2
+ },
+ {
+  "kind": "drop",
+  "id": "p-008",
+  "slug": "mint-glow-candle",
+  "name": "mint glow glass candle",
+  "drop": {
+   "slug": "golden-hour",
+   "name": "golden hour"
+  },
+  "shortDescription": "cool mint in a glow-green glass.",
+  "longDescription": "a fresh mint soy candle in a glow-tinted glass that looks like a keeper long after it's burned down. 35-hour burn.",
+  "images": [
+   {
+    "url": "/products/mint-glow-candle/1.png",
+    "alt": "mint glow glass candle"
+   },
+   {
+    "url": "/products/mint-glow-candle/2.png",
+    "alt": "mint glow glass candle"
+   },
+   {
+    "url": "/products/mint-glow-candle/3.png",
+    "alt": "mint glow glass candle"
+   },
+   {
+    "url": "/products/mint-glow-candle/4.png",
+    "alt": "mint glow glass candle"
+   }
+  ],
+  "price": {
+   "amount": 79900,
+   "currency": "INR"
+  },
+  "inventory": 6,
+  "preOrder": false,
+  "dropAt": 1783463399023
+ },
+ {
+  "kind": "drop",
+  "id": "p-009",
+  "slug": "royal-glow-pillar",
+  "name": "royal glow pillar candle",
+  "drop": {
+   "slug": "golden-hour",
+   "name": "golden hour"
+  },
+  "shortDescription": "a tall pillar with real presence.",
+  "longDescription": "a chunky pillar candle with a warm amber glow — the centrepiece kind. unscented, long slow burn.",
+  "images": [
+   {
+    "url": "/products/royal-glow-pillar/1.png",
+    "alt": "royal glow pillar candle"
+   },
+   {
+    "url": "/products/royal-glow-pillar/2.png",
+    "alt": "royal glow pillar candle"
+   },
+   {
+    "url": "/products/royal-glow-pillar/3.png",
+    "alt": "royal glow pillar candle"
+   },
+   {
+    "url": "/products/royal-glow-pillar/4.png",
+    "alt": "royal glow pillar candle"
+   },
+   {
+    "url": "/products/royal-glow-pillar/5.png",
+    "alt": "royal glow pillar candle"
+   }
+  ],
+  "price": {
+   "amount": 149900,
+   "currency": "INR"
+  },
+  "inventory": 4,
+  "preOrder": false,
+  "dropAt": 1783463399023
+ },
+ {
+  "kind": "ready",
+  "id": "p-010",
+  "slug": "dream-carriage",
+  "name": "dream carriage crystal decor",
+  "shortDescription": "a crystal carriage that catches light.",
+  "longDescription": "a crystal cinderella-carriage ornament that throws tiny rainbows across the room. shelf-main-character energy.",
+  "category": "decor",
+  "images": [
+   {
+    "url": "/products/dream-carriage/1.png",
+    "alt": "dream carriage crystal decor"
+   },
+   {
+    "url": "/products/dream-carriage/2.png",
+    "alt": "dream carriage crystal decor"
+   },
+   {
+    "url": "/products/dream-carriage/3.png",
+    "alt": "dream carriage crystal decor"
+   },
+   {
+    "url": "/products/dream-carriage/4.png",
+    "alt": "dream carriage crystal decor"
+   },
+   {
+    "url": "/products/dream-carriage/5.png",
+    "alt": "dream carriage crystal decor"
+   }
+  ],
+  "price": {
+   "amount": 249900,
+   "currency": "INR"
+  },
+  "inventory": 8,
+  "leadTimeDays": 2
+ },
+ {
+  "kind": "ready",
+  "id": "p-011",
+  "slug": "the-hourglass",
+  "name": "the hourglass",
+  "shortDescription": "sand, glass, and a slower minute.",
+  "longDescription": "a weighted glass hourglass on a wooden base. flip it when you need a reason to look away from your phone.",
+  "category": "decor",
+  "images": [
+   {
+    "url": "/products/the-hourglass/1.png",
+    "alt": "the hourglass"
+   },
+   {
+    "url": "/products/the-hourglass/2.png",
+    "alt": "the hourglass"
+   },
+   {
+    "url": "/products/the-hourglass/3.png",
+    "alt": "the hourglass"
+   },
+   {
+    "url": "/products/the-hourglass/4.png",
+    "alt": "the hourglass"
+   },
+   {
+    "url": "/products/the-hourglass/5.png",
+    "alt": "the hourglass"
+   }
+  ],
+  "price": {
+   "amount": 199900,
+   "currency": "INR"
+  },
+  "inventory": 3,
+  "leadTimeDays": 2
+ },
+ {
+  "kind": "ready",
+  "id": "p-012",
+  "slug": "eiffel-in-a-frame",
+  "name": "eiffel tower, framed",
+  "shortDescription": "a tiny paris for your shelf.",
+  "longDescription": "a delicate eiffel tower model set in a display frame. for the friend who's mentally always in paris.",
+  "category": "decor",
+  "images": [
+   {
+    "url": "/products/eiffel-in-a-frame/1.png",
+    "alt": "eiffel tower, framed"
+   },
+   {
+    "url": "/products/eiffel-in-a-frame/2.png",
+    "alt": "eiffel tower, framed"
+   },
+   {
+    "url": "/products/eiffel-in-a-frame/3.png",
+    "alt": "eiffel tower, framed"
+   },
+   {
+    "url": "/products/eiffel-in-a-frame/4.png",
+    "alt": "eiffel tower, framed"
+   },
+   {
+    "url": "/products/eiffel-in-a-frame/5.png",
+    "alt": "eiffel tower, framed"
+   }
+  ],
+  "price": {
+   "amount": 179900,
+   "currency": "INR"
+  },
+  "inventory": 5,
+  "leadTimeDays": 2
+ },
+ {
+  "kind": "ready",
+  "id": "p-013",
+  "slug": "ship-in-a-bottle",
+  "name": "ship in a bottle",
+  "shortDescription": "a whole voyage, sealed in glass.",
+  "longDescription": "a classic hand-assembled ship inside a glass bottle on a wooden stand. quietly impressive, ages beautifully.",
+  "category": "decor",
+  "images": [
+   {
+    "url": "/products/ship-in-a-bottle/1.png",
+    "alt": "ship in a bottle"
+   },
+   {
+    "url": "/products/ship-in-a-bottle/2.png",
+    "alt": "ship in a bottle"
+   },
+   {
+    "url": "/products/ship-in-a-bottle/3.png",
+    "alt": "ship in a bottle"
+   },
+   {
+    "url": "/products/ship-in-a-bottle/4.png",
+    "alt": "ship in a bottle"
+   },
+   {
+    "url": "/products/ship-in-a-bottle/5.png",
+    "alt": "ship in a bottle"
+   }
+  ],
+  "price": {
+   "amount": 229900,
+   "currency": "INR"
+  },
+  "inventory": 10,
+  "leadTimeDays": 2
+ },
+ {
+  "kind": "ready",
+  "id": "p-014",
+  "slug": "ship-shadow-box",
+  "name": "ship shadow box",
+  "shortDescription": "a sailing ship in a lit shadow box.",
+  "longDescription": "a detailed sailing ship mounted in a deep shadow box. looks gallery-grade on a shelf or desk.",
+  "category": "decor",
+  "images": [
+   {
+    "url": "/products/ship-shadow-box/1.png",
+    "alt": "ship shadow box"
+   },
+   {
+    "url": "/products/ship-shadow-box/2.png",
+    "alt": "ship shadow box"
+   },
+   {
+    "url": "/products/ship-shadow-box/3.png",
+    "alt": "ship shadow box"
+   },
+   {
+    "url": "/products/ship-shadow-box/4.png",
+    "alt": "ship shadow box"
+   }
+  ],
+  "price": {
+   "amount": 259900,
+   "currency": "INR"
+  },
+  "inventory": 7,
+  "leadTimeDays": 2
+ },
+ {
+  "kind": "ready",
+  "id": "p-015",
+  "slug": "beaded-gold-necklace",
+  "name": "beaded gold necklace",
+  "shortDescription": "gold-tone chain, colourful beads.",
+  "longDescription": "a delicate gold-tone necklace strung with colourful glass beads. everyday-wear, tarnish-resistant, adjustable.",
+  "category": "jewellery",
+  "images": [
+   {
+    "url": "/products/beaded-gold-necklace/1.png",
+    "alt": "beaded gold necklace"
+   },
+   {
+    "url": "/products/beaded-gold-necklace/2.png",
+    "alt": "beaded gold necklace"
+   },
+   {
+    "url": "/products/beaded-gold-necklace/3.png",
+    "alt": "beaded gold necklace"
+   },
+   {
+    "url": "/products/beaded-gold-necklace/4.png",
+    "alt": "beaded gold necklace"
+   },
+   {
+    "url": "/products/beaded-gold-necklace/5.png",
+    "alt": "beaded gold necklace"
+   }
+  ],
+  "price": {
+   "amount": 189900,
+   "currency": "INR"
+  },
+  "inventory": 2,
+  "leadTimeDays": 2
+ },
+ {
+  "kind": "ready",
+  "id": "p-016",
+  "slug": "crystal-silver-set",
+  "name": "crystal silver jewellery set",
+  "shortDescription": "silver + crystals. matching set.",
+  "longDescription": "a silver-tone set — necklace plus earrings — set with clear crystals. the this-looks-expensive gift.",
+  "category": "jewellery",
+  "images": [
+   {
+    "url": "/products/crystal-silver-set/1.png",
+    "alt": "crystal silver jewellery set"
+   },
+   {
+    "url": "/products/crystal-silver-set/2.png",
+    "alt": "crystal silver jewellery set"
+   },
+   {
+    "url": "/products/crystal-silver-set/3.png",
+    "alt": "crystal silver jewellery set"
+   },
+   {
+    "url": "/products/crystal-silver-set/4.png",
+    "alt": "crystal silver jewellery set"
+   },
+   {
+    "url": "/products/crystal-silver-set/5.png",
+    "alt": "crystal silver jewellery set"
+   }
+  ],
+  "price": {
+   "amount": 279900,
+   "currency": "INR"
+  },
+  "inventory": 6,
+  "leadTimeDays": 2
+ },
+ {
+  "kind": "ready",
+  "id": "p-017",
+  "slug": "blossom-hair-claw",
+  "name": "blossom bloom hair claw",
+  "shortDescription": "a crochet flower on a sturdy claw.",
+  "longDescription": "a hand-crocheted blossom on a strong hair claw. holds a bun, looks soft doing it.",
+  "category": "charms",
+  "images": [
+   {
+    "url": "/products/blossom-hair-claw/1.png",
+    "alt": "blossom bloom hair claw"
+   },
+   {
+    "url": "/products/blossom-hair-claw/2.png",
+    "alt": "blossom bloom hair claw"
+   },
+   {
+    "url": "/products/blossom-hair-claw/3.png",
+    "alt": "blossom bloom hair claw"
+   },
+   {
+    "url": "/products/blossom-hair-claw/4.png",
+    "alt": "blossom bloom hair claw"
+   }
+  ],
+  "price": {
+   "amount": 49900,
+   "currency": "INR"
+  },
+  "inventory": 4,
+  "leadTimeDays": 2
+ },
+ {
+  "kind": "ready",
+  "id": "p-018",
+  "slug": "cherry-bow-charm",
+  "name": "cherry bow charm",
+  "shortDescription": "a little crochet cherry-bow charm.",
+  "longDescription": "a hand-crocheted cherry-and-bow charm for a bag, keys, or a phone. sweet without being too much.",
+  "category": "charms",
+  "images": [
+   {
+    "url": "/products/cherry-bow-charm/1.png",
+    "alt": "cherry bow charm"
+   },
+   {
+    "url": "/products/cherry-bow-charm/2.png",
+    "alt": "cherry bow charm"
+   },
+   {
+    "url": "/products/cherry-bow-charm/3.png",
+    "alt": "cherry bow charm"
+   },
+   {
+    "url": "/products/cherry-bow-charm/4.png",
+    "alt": "cherry bow charm"
+   },
+   {
+    "url": "/products/cherry-bow-charm/5.png",
+    "alt": "cherry bow charm"
+   }
+  ],
+  "price": {
+   "amount": 39900,
+   "currency": "INR"
+  },
+  "inventory": 8,
+  "leadTimeDays": 2
+ },
+ {
+  "kind": "mto",
+  "id": "p-019",
+  "slug": "cloud-puff-scrunchie",
+  "name": "cloud puff scrunchie",
+  "shortDescription": "the softest crochet scrunchie.",
+  "longDescription": "a hand-crocheted scrunchie with a cloud-soft puff. gentle on hair, made to order in your colour.",
+  "category": "charms",
+  "basePrice": {
+   "amount": 44900,
+   "currency": "INR"
+  },
+  "leadTimeDays": 7,
+  "colorOptions": [
+   {
+    "id": "cream",
+    "name": "cream",
+    "hex": "#f0e9dc"
+   },
+   {
+    "id": "rose",
+    "name": "rose",
+    "hex": "#e59ab0"
+   },
+   {
+    "id": "sage",
+    "name": "sage",
+    "hex": "#9bb591"
+   },
+   {
+    "id": "lilac",
+    "name": "lilac",
+    "hex": "#c3a6e8"
+   }
+  ],
+  "depositPercent": 50,
+  "images": [
+   {
+    "url": "/products/cloud-puff-scrunchie/1.png",
+    "alt": "cloud puff scrunchie"
+   },
+   {
+    "url": "/products/cloud-puff-scrunchie/2.png",
+    "alt": "cloud puff scrunchie"
+   },
+   {
+    "url": "/products/cloud-puff-scrunchie/3.png",
+    "alt": "cloud puff scrunchie"
+   },
+   {
+    "url": "/products/cloud-puff-scrunchie/4.png",
+    "alt": "cloud puff scrunchie"
+   },
+   {
+    "url": "/products/cloud-puff-scrunchie/5.png",
+    "alt": "cloud puff scrunchie"
+   }
+  ]
+ },
+ {
+  "kind": "ready",
+  "id": "p-020",
+  "slug": "evil-eye-charm",
+  "name": "evil eye charm",
+  "shortDescription": "keeps the bad vibes out.",
+  "longDescription": "a hand-crocheted evil-eye charm to clip on a bag or keys. protective energy, cute execution.",
+  "category": "charms",
+  "images": [
+   {
+    "url": "/products/evil-eye-charm/1.png",
+    "alt": "evil eye charm"
+   },
+   {
+    "url": "/products/evil-eye-charm/2.png",
+    "alt": "evil eye charm"
+   },
+   {
+    "url": "/products/evil-eye-charm/3.png",
+    "alt": "evil eye charm"
+   },
+   {
+    "url": "/products/evil-eye-charm/4.png",
+    "alt": "evil eye charm"
+   },
+   {
+    "url": "/products/evil-eye-charm/5.png",
+    "alt": "evil eye charm"
+   }
+  ],
+  "price": {
+   "amount": 49900,
+   "currency": "INR"
+  },
+  "inventory": 5,
+  "leadTimeDays": 2
+ },
+ {
+  "kind": "ready",
+  "id": "p-021",
+  "slug": "everbloom-rose-keychain",
+  "name": "everbloom rose keychain",
+  "shortDescription": "a rose that never wilts.",
+  "longDescription": "a hand-crocheted rose keychain that stays in bloom forever. a tiny just-because gift.",
+  "category": "charms",
+  "images": [
+   {
+    "url": "/products/everbloom-rose-keychain/1.png",
+    "alt": "everbloom rose keychain"
+   },
+   {
+    "url": "/products/everbloom-rose-keychain/2.png",
+    "alt": "everbloom rose keychain"
+   },
+   {
+    "url": "/products/everbloom-rose-keychain/3.png",
+    "alt": "everbloom rose keychain"
+   },
+   {
+    "url": "/products/everbloom-rose-keychain/4.png",
+    "alt": "everbloom rose keychain"
+   }
+  ],
+  "price": {
+   "amount": 54900,
+   "currency": "INR"
+  },
+  "inventory": 10,
+  "leadTimeDays": 2
+ },
+ {
+  "kind": "ready",
+  "id": "p-022",
+  "slug": "watermelon-charm",
+  "name": "juicy watermelon charm",
+  "shortDescription": "a slice of summer for your keys.",
+  "longDescription": "a hand-crocheted watermelon-slice charm. summer, all year, on your keyring.",
+  "category": "charms",
+  "images": [
+   {
+    "url": "/products/watermelon-charm/1.png",
+    "alt": "juicy watermelon charm"
+   },
+   {
+    "url": "/products/watermelon-charm/2.png",
+    "alt": "juicy watermelon charm"
+   },
+   {
+    "url": "/products/watermelon-charm/3.png",
+    "alt": "juicy watermelon charm"
+   },
+   {
+    "url": "/products/watermelon-charm/4.png",
+    "alt": "juicy watermelon charm"
+   },
+   {
+    "url": "/products/watermelon-charm/5.png",
+    "alt": "juicy watermelon charm"
+   }
+  ],
+  "price": {
+   "amount": 44900,
+   "currency": "INR"
+  },
+  "inventory": 7,
+  "leadTimeDays": 2
+ },
+ {
+  "kind": "ready",
+  "id": "p-023",
+  "slug": "moonglow-keychain",
+  "name": "moonglow charm keychain",
+  "shortDescription": "a soft crochet moon charm.",
+  "longDescription": "a hand-crocheted crescent-moon keychain in dreamy tones. for your favourite night owl.",
+  "category": "charms",
+  "images": [
+   {
+    "url": "/products/moonglow-keychain/1.png",
+    "alt": "moonglow charm keychain"
+   },
+   {
+    "url": "/products/moonglow-keychain/2.png",
+    "alt": "moonglow charm keychain"
+   },
+   {
+    "url": "/products/moonglow-keychain/3.png",
+    "alt": "moonglow charm keychain"
+   },
+   {
+    "url": "/products/moonglow-keychain/4.png",
+    "alt": "moonglow charm keychain"
+   },
+   {
+    "url": "/products/moonglow-keychain/5.png",
+    "alt": "moonglow charm keychain"
+   }
+  ],
+  "price": {
+   "amount": 59900,
+   "currency": "INR"
+  },
+  "inventory": 2,
+  "leadTimeDays": 2
+ },
+ {
+  "kind": "ready",
+  "id": "p-024",
+  "slug": "princess-ribbon-bow",
+  "name": "princess ribbon hair bow",
+  "shortDescription": "a big soft crochet bow.",
+  "longDescription": "a hand-crocheted ribbon bow on a clip. the coquette-core finishing touch.",
+  "category": "charms",
+  "images": [
+   {
+    "url": "/products/princess-ribbon-bow/1.png",
+    "alt": "princess ribbon hair bow"
+   },
+   {
+    "url": "/products/princess-ribbon-bow/2.png",
+    "alt": "princess ribbon hair bow"
+   },
+   {
+    "url": "/products/princess-ribbon-bow/3.png",
+    "alt": "princess ribbon hair bow"
+   },
+   {
+    "url": "/products/princess-ribbon-bow/4.png",
+    "alt": "princess ribbon hair bow"
+   }
+  ],
+  "price": {
+   "amount": 39900,
+   "currency": "INR"
+  },
+  "inventory": 6,
+  "leadTimeDays": 2
+ },
+ {
+  "kind": "ready",
+  "id": "p-025",
+  "slug": "sunny-bloom-bow",
+  "name": "sunny bloom hair bow",
+  "shortDescription": "a sunny crochet bow clip.",
+  "longDescription": "a hand-crocheted flower bow in warm sunny tones. clips into any hairstyle in a second.",
+  "category": "charms",
+  "images": [
+   {
+    "url": "/products/sunny-bloom-bow/1.png",
+    "alt": "sunny bloom hair bow"
+   },
+   {
+    "url": "/products/sunny-bloom-bow/2.png",
+    "alt": "sunny bloom hair bow"
+   },
+   {
+    "url": "/products/sunny-bloom-bow/3.png",
+    "alt": "sunny bloom hair bow"
+   },
+   {
+    "url": "/products/sunny-bloom-bow/4.png",
+    "alt": "sunny bloom hair bow"
+   }
+  ],
+  "price": {
+   "amount": 39900,
+   "currency": "INR"
+  },
+  "inventory": 4,
+  "leadTimeDays": 2
+ },
+ {
+  "kind": "ready",
+  "id": "p-026",
+  "slug": "tiny-turtle-keychain",
+  "name": "tiny turtle charm keychain",
+  "shortDescription": "a pocket-sized crochet turtle.",
+  "longDescription": "a hand-crocheted turtle keychain, palm-sized and pocket-ready. slow and steady and very cute.",
+  "category": "charms",
+  "images": [
+   {
+    "url": "/products/tiny-turtle-keychain/1.png",
+    "alt": "tiny turtle charm keychain"
+   },
+   {
+    "url": "/products/tiny-turtle-keychain/2.png",
+    "alt": "tiny turtle charm keychain"
+   },
+   {
+    "url": "/products/tiny-turtle-keychain/3.png",
+    "alt": "tiny turtle charm keychain"
+   },
+   {
+    "url": "/products/tiny-turtle-keychain/4.png",
+    "alt": "tiny turtle charm keychain"
+   },
+   {
+    "url": "/products/tiny-turtle-keychain/5.png",
+    "alt": "tiny turtle charm keychain"
+   }
+  ],
+  "price": {
+   "amount": 54900,
+   "currency": "INR"
+  },
+  "inventory": 8,
+  "leadTimeDays": 2
+ },
+ {
+  "kind": "mto",
+  "id": "p-027",
+  "slug": "sunflower-keychain",
+  "name": "crochet sunflower keychain",
+  "shortDescription": "a sunflower that follows you.",
+  "longDescription": "a hand-crocheted sunflower keychain. made to order in your colour — a little pocket of summer.",
+  "category": "charms",
+  "basePrice": {
+   "amount": 49900,
+   "currency": "INR"
+  },
+  "leadTimeDays": 7,
+  "colorOptions": [
+   {
+    "id": "cream",
+    "name": "cream",
+    "hex": "#f0e9dc"
+   },
+   {
+    "id": "rose",
+    "name": "rose",
+    "hex": "#e59ab0"
+   },
+   {
+    "id": "sage",
+    "name": "sage",
+    "hex": "#9bb591"
+   },
+   {
+    "id": "lilac",
+    "name": "lilac",
+    "hex": "#c3a6e8"
+   }
+  ],
+  "depositPercent": 50,
+  "images": [
+   {
+    "url": "/products/sunflower-keychain/1.png",
+    "alt": "crochet sunflower keychain"
+   },
+   {
+    "url": "/products/sunflower-keychain/2.png",
+    "alt": "crochet sunflower keychain"
+   },
+   {
+    "url": "/products/sunflower-keychain/3.png",
+    "alt": "crochet sunflower keychain"
+   },
+   {
+    "url": "/products/sunflower-keychain/4.png",
+    "alt": "crochet sunflower keychain"
+   },
+   {
+    "url": "/products/sunflower-keychain/5.png",
+    "alt": "crochet sunflower keychain"
+   }
+  ]
+ }
+]
