@@ -19,7 +19,7 @@ import cartRoutes from "./routes/cartRoute.js";
 import wishlistRoutes from "./routes/wishlistRoute.js";
 import orderRoutes from "./routes/orderRoute.js";
 import paymentRoutes from "./routes/paymentRoute.js";
-import shippingRoutes from "./routes/shippingRoutes.js"; // ADD THIS LINE
+import shippingRoutes from "./routes/shippingRoutes.js";
 import contentRoutes from "./routes/contentRoutes.js";
 import homepageRoutes from "./routes/homepageRoutes.js";
 import contactRoutes from "./routes/contactRoutes.js";
@@ -32,19 +32,31 @@ import mlmRoutes from "./routes/mlmRoutes.js";
 import editorRoutes from "./routes/editorRoutes.js";
 import rateLimit from "express-rate-limit";
 
+// kynq gift routes (drops, bundles, journal, posts, pairings, wishes, etc.)
+import giftReviews from "./gift/routes/reviews.js";
+import giftDrops from "./gift/routes/drops.js";
+import giftBundles from "./gift/routes/bundles.js";
+import giftJournal from "./gift/routes/journal.js";
+import giftPosts from "./gift/routes/posts.js";
+import giftNewsletter from "./gift/routes/newsletter.js";
+import giftWishes from "./gift/routes/wishes.js";
+import giftPairings from "./gift/routes/pairings.js";
+import giftCheckout from "./gift/routes/checkout.js";
+import giftWebhook from "./gift/routes/webhook.js";
+
 
 dotenv.config();
 
 const app = express();
 
 // Regular body parsing middleware for most routes
-// Skip body parsing for webhook route to preserve raw body for Stripe signature verification
+// Skip body parsing for webhook routes to preserve raw body for Stripe signature verification
 app.use((req, res, next) => {
-  if (req.originalUrl === "/api/payments/webhook") {
+  if (req.originalUrl === "/api/payments/webhook" || req.originalUrl === "/api/webhooks/stripe") {
     next();
     return;
   }
-  express.json()(req, res, next); 
+  express.json({ limit: "12mb" })(req, res, next); 
 });
 
 app.use((req, res, next) => {
@@ -78,6 +90,13 @@ const generalLimiter = rateLimit({
 
 app.use(express.static(path.join(__dirname, "../public")));
 
+// Media served from public/media (used by posts, wishes uploads)
+app.use("/media", express.static(path.join(__dirname, "../public/media")));
+
+// Stripe webhook from gift API — needs raw body, mounted before json parser is applied.
+// Since we already skipped json for this URL above, mount it here directly.
+app.use("/api/webhooks/stripe", express.raw({ type: "application/json" }), giftWebhook);
+
 // API Routes
 app.use("/api/admin", authLimiter, adminRoutes);
 app.use("/api/users", authLimiter, userRoutes);
@@ -99,6 +118,19 @@ app.use("/api/projects", generalLimiter, projectRoutes);
 app.use("/api/products/export", generalLimiter, productExportRoutes);
 app.use("/api/mlm", generalLimiter, mlmRoutes);
 app.use("/api/editors", authLimiter, editorRoutes);
+
+// ─── kynq gift routes ───
+// These use the same MONGO_URI connection but access different collections.
+// Mounted AFTER the main routes above so they don't conflict.
+app.use("/api/products", generalLimiter, giftReviews);
+app.use("/api/drops", generalLimiter, giftDrops);
+app.use("/api/bundles", generalLimiter, giftBundles);
+app.use("/api/journal", generalLimiter, giftJournal);
+app.use("/api/posts", generalLimiter, giftPosts);
+app.use("/api/newsletter", generalLimiter, giftNewsletter);
+app.use("/api/wishes", generalLimiter, giftWishes);
+app.use("/api/pairings", generalLimiter, giftPairings);
+app.use("/api/checkout", generalLimiter, giftCheckout);
 
 // Health check
 app.get("/api/health", (req, res) => {
