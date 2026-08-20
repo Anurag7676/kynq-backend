@@ -996,7 +996,7 @@
 //     console.log(`[BULK UPLOAD] Creating new product: ${row.SKU} (Request Quote: ${isRequestQuote}, UOM: ${productData.uom})`);
     
 //     // Add creation-specific fields
-//     productData.isPublished = false; // New products are draft by default
+//     productData.isPublished = true; // New products are published by default
 //     productData.createdBy = adminId;
     
 //     return await Product.create(productData);
