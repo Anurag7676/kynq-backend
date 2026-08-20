@@ -68,7 +68,11 @@ app.use((req, res, next) => {
   express.urlencoded({ extended: false })(req, res, next);
 });
 app.use(cookieParser());
-app.use(cors({ origin: "https://kynq.in", credentials: true }));
+// Allowed browser origins — override with comma-separated CORS_ORIGINS env.
+const ALLOWED_ORIGINS = process.env.CORS_ORIGINS
+  ? process.env.CORS_ORIGINS.split(",").map((s) => s.trim()).filter(Boolean)
+  : ["https://kynq.in", "https://www.kynq.in", "http://localhost:3007", "http://localhost:3000"];
+app.use(cors({ origin: ALLOWED_ORIGINS, credentials: true }));
 app.use(helmet());
 
 if (process.env.NODE_ENV === "development") {
