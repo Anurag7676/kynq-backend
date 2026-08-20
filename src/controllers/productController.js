@@ -1598,12 +1598,24 @@ const getRelatedProducts = async (req, res) => {
 // @access  Public
 const getProductReviews = async (req, res) => {
   try {
-    const product = await Product.findById(req.params.id)
-      .select("reviews rating numReviews isRequestQuote")
-      .populate({
-        path: "reviews.user",
-        select: "firstName lastName profilePicture",
-      });
+    const idOrSlug = req.params.id;
+    let product;
+
+    if (mongoose.Types.ObjectId.isValid(idOrSlug)) {
+      product = await Product.findById(idOrSlug)
+        .select("reviews rating numReviews isRequestQuote")
+        .populate({
+          path: "reviews.user",
+          select: "firstName lastName profilePicture",
+        });
+    } else {
+      product = await Product.findOne({ slug: idOrSlug })
+        .select("reviews rating numReviews isRequestQuote")
+        .populate({
+          path: "reviews.user",
+          select: "firstName lastName profilePicture",
+        });
+    }
 
     if (!product) {
       return res.status(404).json({
