@@ -68,7 +68,7 @@ const getCart = async (req, res) => {
       } else if (req.query.sessionId) {
         cart = new Cart({ sessionId: req.query.sessionId, items: [] });
       } else {
-        const sessionId = mongoose.Types.ObjectId().toString();
+        const sessionId = new mongoose.Types.ObjectId().toString();
         cart = new Cart({ sessionId, items: [] });
       }
       await cart.save();

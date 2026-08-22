@@ -1374,7 +1374,7 @@ const getCategoryImpactAnalysis = async (req, res) => {
 
     // Get all affected categories (including subcategories)
     const allAffectedCategories = await getAllSubcategoriesRecursively(categoryId);
-    allAffectedCategories.push(mongoose.Types.ObjectId(categoryId));
+    allAffectedCategories.push(new mongoose.Types.ObjectId(categoryId));
 
     // Get product impact analysis
     const productImpact = await Product.aggregate([

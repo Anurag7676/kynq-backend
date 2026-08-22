@@ -1,18 +1,19 @@
 import express from "express";
 import { collection } from "../store.js";
 import { getScopedId } from "../session.js";
-import { computeTotals, createOrder, setOrderStatus } from "../orders-store.js";
+import { computeTotals, createOrder, setOrderStatus, updateOrder } from "../orders-store.js";
 import { ok, created, badRequest, wrap } from "../http.js";
+import { cashfreeConfigured, cashfreeMode, createCashfreeOrder } from "../cashfree.js";
 
 const router = express.Router();
 const carts = collection("carts");
 const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:3000";
-const stripeConfigured = !!process.env.STRIPE_SECRET_KEY;
 
 // POST /api/checkout/session
 router.post("/session", wrap(async (req, res) => {
   const b = req.body || {};
   if (!b.customer?.name || !b.customer?.email) return badRequest(res, "customer name + email required");
+  if (cashfreeConfigured && !b.customer?.phone) return badRequest(res, "customer phone required");
 
   const { scopedId, userId } = await getScopedId(req, res);
   const cart = (await carts.get(scopedId)) ?? { items: [] };
@@ -34,15 +35,37 @@ router.post("/session", wrap(async (req, res) => {
 
   const successUrl = `${CLIENT_URL}/checkout/confirmation?order=${order.id}`;
 
-  if (!stripeConfigured) {
-    // Demo mode — mark paid, clear cart, return confirmation url.
-    await setOrderStatus(order.id, "paid", "demo mode: no Stripe configured");
+  if (!cashfreeConfigured) {
+    // Demo mode — mark paid, clear cart, return confirmation url directly.
+    await setOrderStatus(order.id, "paid", "demo mode: no Cashfree keys configured");
     await carts.set(scopedId, { sessionId: scopedId, items: [], itemCount: 0, subtotal: 0, currency: "INR", updatedAt: Date.now() });
     return created(res, { url: successUrl, orderId: order.id, mode: "demo" });
   }
 
-  // Stripe mode would create a Checkout Session here.
-  return created(res, { url: successUrl, orderId: order.id, mode: "demo" });
+  // Cashfree only bills INR-major-unit amounts and only supports INR/USD-ish
+  // currencies it's onboarded for — our totals are already INR-only in
+  // practice (see computeTotals: non-INR carts get a flat USD shipping add,
+  // but kynq only sells in INR today).
+  try {
+    const cf = await createCashfreeOrder({
+      orderId: order.id,
+      amount: totals.dueToday,
+      currency: totals.currency,
+      customer: { id: userId || scopedId, name: b.customer.name, email: b.customer.email, phone: b.customer.phone },
+      returnUrl: successUrl,
+    });
+    await updateOrder(order.id, { cashfreeOrderId: cf.order_id, cashfreePaymentSessionId: cf.payment_session_id });
+    return created(res, {
+      orderId: order.id,
+      mode: "cashfree",
+      cashfreeMode,
+      paymentSessionId: cf.payment_session_id,
+    });
+  } catch (err) {
+    console.error("[checkout] Cashfree order creation failed:", err.message, err.cashfree);
+    await setOrderStatus(order.id, "cancelled", `cashfree order creation failed: ${err.message}`);
+    return badRequest(res, "couldn't start payment — try again in a moment");
+  }
 }));
 
 export default router;

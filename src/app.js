@@ -15,8 +15,6 @@ import userRoutes from "./routes/userRoutes.js";
 import productRoutes from "./routes/productRoutes.js";
 import categoryRoutes from "./routes/categoryRoutes.js";
 import blogRoutes from "./routes/blogRoute.js";
-import cartRoutes from "./routes/cartRoute.js";
-import wishlistRoutes from "./routes/wishlistRoute.js";
 import orderRoutes from "./routes/orderRoute.js";
 import paymentRoutes from "./routes/paymentRoute.js";
 import shippingRoutes from "./routes/shippingRoutes.js";
@@ -43,6 +41,16 @@ import giftWishes from "./gift/routes/wishes.js";
 import giftPairings from "./gift/routes/pairings.js";
 import giftCheckout from "./gift/routes/checkout.js";
 import giftWebhook from "./gift/routes/webhook.js";
+import giftWebhookCashfree from "./gift/routes/webhook-cashfree.js";
+// kynq gift cart/wishlist/auth — session-cookie-scoped, match the frontend's
+// cart-context/auth-context contract exactly (POST /items, PATCH /items/:id,
+// magic-link auth). These supersede the legacy Mongo cartRoutes/wishlistRoutes
+// below, which were never wired up to the shape the frontend expects.
+import giftCart from "./gift/routes/cart.js";
+import giftWishlist from "./gift/routes/wishlist.js";
+import giftAuth from "./gift/routes/auth.js";
+import giftContact from "./gift/routes/contact.js";
+import giftOrders from "./gift/routes/orders.js";
 
 
 dotenv.config();
@@ -50,13 +58,14 @@ dotenv.config();
 const app = express();
 
 // Regular body parsing middleware for most routes
-// Skip body parsing for webhook routes to preserve raw body for Stripe signature verification
+// Skip body parsing for webhook routes to preserve raw body for signature verification
+const RAW_BODY_ROUTES = ["/api/payments/webhook", "/api/webhooks/stripe", "/api/webhooks/cashfree"];
 app.use((req, res, next) => {
-  if (req.originalUrl === "/api/payments/webhook" || req.originalUrl === "/api/webhooks/stripe") {
+  if (RAW_BODY_ROUTES.includes(req.originalUrl)) {
     next();
     return;
   }
-  express.json({ limit: "12mb" })(req, res, next); 
+  express.json({ limit: "12mb" })(req, res, next);
 });
 
 app.use((req, res, next) => {
@@ -97,9 +106,11 @@ app.use(express.static(path.join(__dirname, "../public")));
 // Media served from public/media (used by posts, wishes uploads)
 app.use("/media", express.static(path.join(__dirname, "../public/media")));
 
-// Stripe webhook from gift API — needs raw body, mounted before json parser is applied.
-// Since we already skipped json for this URL above, mount it here directly.
+// Payment webhooks from gift API — need raw body, mounted before json parser
+// is applied. Since we already skipped json for these URLs above, mount them
+// here directly.
 app.use("/api/webhooks/stripe", express.raw({ type: "application/json" }), giftWebhook);
+app.use("/api/webhooks/cashfree", express.raw({ type: "application/json" }), giftWebhookCashfree);
 
 // API Routes
 app.use("/api/admin", authLimiter, adminRoutes);
@@ -107,13 +118,24 @@ app.use("/api/users", authLimiter, userRoutes);
 app.use("/api/products", generalLimiter, productRoutes);
 app.use("/api/categories", generalLimiter, categoryRoutes);
 app.use("/api/blogs", generalLimiter, blogRoutes);
-app.use("/api/cart", generalLimiter, cartRoutes);
-app.use("/api/wishlist", generalLimiter, wishlistRoutes);
+// /api/orders is shared: kynq (gift, cookie-scoped) and StylenHomes/admin
+// (legacy, Bearer-JWT-scoped, incl. stats/deliver/refund/invoice) both live
+// here. Bearer-authenticated requests fall through untouched to the legacy
+// router; everything else (kynq's cookie-based checkout/account/order pages)
+// is handled by the gift router.
+app.use("/api/orders", generalLimiter, (req, res, next) => {
+  const isBearerAuthed = req.headers.authorization?.startsWith("Bearer ");
+  if (isBearerAuthed) return next();
+  giftOrders(req, res, next);
+});
 app.use("/api/orders", generalLimiter, orderRoutes);
 app.use("/api/payments", authLimiter, paymentRoutes);
 app.use("/api/shipping", generalLimiter, shippingRoutes);
 app.use("/api/content", generalLimiter, contentRoutes);
 app.use("/api/homepage", generalLimiter, homepageRoutes);
+// kynq's contact form (POST /) is handled by the gift router; legacy admin
+// routes (GET/PUT/DELETE, Bearer-JWT-scoped) fall through untouched.
+app.use("/api/contact", authLimiter, giftContact);
 app.use("/api/contact", authLimiter, contactRoutes);
 app.use("/api/bulk-upload", generalLimiter, bulkUploadRoutes);
 app.use("/api/dashboard", generalLimiter, dashboardRoutes);
@@ -135,6 +157,11 @@ app.use("/api/newsletter", generalLimiter, giftNewsletter);
 app.use("/api/wishes", generalLimiter, giftWishes);
 app.use("/api/pairings", generalLimiter, giftPairings);
 app.use("/api/checkout", generalLimiter, giftCheckout);
+// Session-cookie-scoped cart/wishlist/auth — this is what the frontend's
+// cart-context.tsx / auth-context.tsx actually calls.
+app.use("/api/cart", generalLimiter, giftCart);
+app.use("/api/wishlist", generalLimiter, giftWishlist);
+app.use("/api/auth", authLimiter, giftAuth);
 
 // Health check
 app.get("/api/health", (req, res) => {
