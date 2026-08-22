@@ -1,6 +1,6 @@
 import express from "express";
 import { collection } from "../store.js";
-import { getScopedId } from "../session.js";
+import { getScopedId, syncProfileFromCheckout } from "../session.js";
 import { computeTotals, createOrder, setOrderStatus, updateOrder } from "../orders-store.js";
 import { ok, created, badRequest, unauthorized, wrap } from "../http.js";
 import { cashfreeConfigured, cashfreeMode, createCashfreeOrder } from "../cashfree.js";
@@ -22,6 +22,12 @@ router.post("/session", wrap(async (req, res) => {
   if (!userId) return unauthorized(res, "sign in to check out");
   const cart = (await carts.get(scopedId)) ?? { items: [] };
   if (!cart.items || cart.items.length === 0) return badRequest(res, "cart is empty");
+
+  // Fill in the account name (if never set — e.g. signed in via /login or
+  // the checkout gate rather than /register) and save this shipping address
+  // for next time. Independent of payment outcome — this is about the
+  // account, not the order.
+  await syncProfileFromCheckout(userId, { name: b.customer.name, address: b.shippingAddress });
 
   const totals = computeTotals(cart.items);
   const order = await createOrder({

@@ -55,6 +55,49 @@ export async function saveUser(user) {
   return user;
 }
 
+function addressKey(a) {
+  return [a.line1, a.city, a.postalCode].map((s) => (s || "").trim().toLowerCase()).join("|");
+}
+
+// Called from checkout — fills in the account's name (if it was never set,
+// e.g. the user signed in via /login or the checkout gate rather than
+// /register) and saves the shipping address to their address book (deduped
+// by line1+city+postalCode, so re-ordering to the same place doesn't create
+// duplicates). Both are no-ops if there's nothing new to save.
+export async function syncProfileFromCheckout(userId, { name, address } = {}) {
+  const user = await findUserById(userId);
+  if (!user) return;
+
+  let changed = false;
+  const next = { ...user, addresses: user.addresses ? [...user.addresses] : [] };
+
+  if (!next.name && name) {
+    next.name = name;
+    changed = true;
+  }
+
+  if (address?.line1 && address?.city && address?.postalCode) {
+    const key = addressKey(address);
+    const exists = next.addresses.some((a) => addressKey(a) === key);
+    if (!exists) {
+      next.addresses.push({
+        id: makeId("addr"),
+        label: address.label,
+        line1: address.line1,
+        line2: address.line2,
+        city: address.city,
+        state: address.state,
+        postalCode: address.postalCode,
+        country: address.country || "India",
+        isDefault: next.addresses.length === 0,
+      });
+      changed = true;
+    }
+  }
+
+  if (changed) await saveUser(next);
+}
+
 // ─── Auth sessions ─────────────────────────────────────────
 export async function createAuthSession(userId) {
   const token = makeToken();
