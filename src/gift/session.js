@@ -1,6 +1,6 @@
 // Session + auth layer for the gift API. Two cookies:
 //   kynq_session — anonymous shopping session (scopes cart/wishlist pre-login)
-//   kynq_auth    — signed-in session token (magic-link auth)
+//   kynq_auth    — signed-in session token (email OTP auth, see otp.js)
 // Ports lib/server/{session,scope,auth,auth-store}.
 
 import { collection, makeToken, makeId } from "./store.js";
@@ -9,11 +9,9 @@ const ANON_COOKIE = "kynq_session";
 const AUTH_COOKIE = "kynq_auth";
 const ONE_YEAR_S = 60 * 60 * 24 * 365;
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
-const FIFTEEN_MIN_MS = 15 * 60 * 1000;
 
 const users = collection("users");
 const sessions = collection("auth-sessions");
-const magicLinks = collection("magic-links");
 
 function cookieOpts(maxAgeS) {
   return {
@@ -100,19 +98,4 @@ export async function getScopedId(req, res) {
   if (user) return { scopedId: user.id, userId: user.id, isAuthenticated: true };
   const { sessionId } = getOrCreateSession(req, res);
   return { scopedId: sessionId, userId: null, isAuthenticated: false };
-}
-
-// ─── Magic links ───────────────────────────────────────────
-export async function createMagicLink(email) {
-  const token = makeToken();
-  const now = Date.now();
-  const link = { token, email: email.toLowerCase().trim(), createdAt: now, expiresAt: now + FIFTEEN_MIN_MS, consumed: false };
-  await magicLinks.set(token, link);
-  return link;
-}
-export async function consumeMagicLink(token) {
-  const link = await magicLinks.get(token);
-  if (!link || link.consumed || link.expiresAt < Date.now()) return null;
-  await magicLinks.set(token, { ...link, consumed: true });
-  return link;
 }

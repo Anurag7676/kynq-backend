@@ -19,6 +19,8 @@ export const notFound = (res, message = "not found") =>
   send(res, 404, { error: "not_found", message });
 export const conflict = (res, message) =>
   send(res, 409, { error: "conflict", message });
+export const tooMany = (res, message, details) =>
+  send(res, 429, { error: "too_many_requests", message, ...(details ? { details } : {}) });
 export const serverError = (res, err) => {
   console.error("[api]", err);
   send(res, 500, {

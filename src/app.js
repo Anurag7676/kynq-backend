@@ -161,7 +161,11 @@ app.use("/api/checkout", generalLimiter, giftCheckout);
 // cart-context.tsx / auth-context.tsx actually calls.
 app.use("/api/cart", generalLimiter, giftCart);
 app.use("/api/wishlist", generalLimiter, giftWishlist);
-app.use("/api/auth", authLimiter, giftAuth);
+// generalLimiter, not authLimiter — GET /api/auth/me is polled on every
+// page mount (AuthProvider), so it needs the same headroom as any other
+// read endpoint. The actual sensitive routes (request-otp/verify-otp) carry
+// their own dedicated limiter inside gift/routes/auth.js.
+app.use("/api/auth", generalLimiter, giftAuth);
 
 // Health check
 app.get("/api/health", (req, res) => {

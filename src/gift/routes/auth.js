@@ -1,59 +1,79 @@
 import express from "express";
+import rateLimit from "express-rate-limit";
 import { collection } from "../store.js";
 import {
-  createMagicLink, consumeMagicLink, getOrCreateUser, saveUser,
+  getOrCreateUser, saveUser,
   signIn, signOut, getCurrentUser, getOrCreateSession,
 } from "../session.js";
+import { requestOtp, verifyOtp } from "../otp.js";
 import { mergeAnonymousIntoUser } from "../merge.js";
-import { ok, badRequest, unauthorized, wrap } from "../http.js";
+import { ok, badRequest, unauthorized, tooMany, wrap } from "../http.js";
 
 const router = express.Router();
 const users = collection("users");
-const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:3000";
+
+// IP-scoped, on top of otp.js's own per-email cooldown/attempt-cap — this
+// guards against one IP hammering many different email addresses, which a
+// per-email limit alone doesn't catch. Mounted only on the two OTP routes,
+// not the whole /api/auth router (GET /me is polled far more often than
+// this and needs its own, much larger budget — see app.js).
+const otpLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  message: { error: "too_many_requests", message: "too many attempts — try again later." },
+});
 
 // Only allow redirecting back into our own app — a `next` value is
-// user-supplied (comes back through an emailed link), so treat it as
-// untrusted and restrict it to a same-app relative path.
+// client-supplied, so treat it as untrusted and restrict it to a
+// same-app relative path.
 function safeNext(raw) {
   if (typeof raw !== "string" || !raw.startsWith("/") || raw.startsWith("//")) return "/account";
   return raw;
 }
 
-// POST /api/auth/request-link — mint a magic link, "send" it (logged in dev)
-router.post("/request-link", wrap(async (req, res) => {
+// POST /api/auth/request-otp — email a 6-digit sign-in code (logged in dev)
+router.post("/request-otp", otpLimiter, wrap(async (req, res) => {
   const email = req.body?.email;
   const name = req.body?.name;
-  const next = safeNext(req.body?.next);
   if (!email || !/.+@.+\..+/.test(email)) return badRequest(res, "valid email required");
-  const link = await createMagicLink(email);
-  if (name) {
-    const user = await getOrCreateUser(email, name);
+  if (name) await getOrCreateUser(email, name);
+
+  const result = await requestOtp(email);
+  if (!result.ok && result.reason === "cooldown") {
+    return tooMany(res, "a code was just sent — wait a moment before requesting another.", { retryAfterMs: result.retryAfterMs });
   }
-  const url = `${req.protocol}://${req.get("host")}/api/auth/verify?token=${encodeURIComponent(link.token)}&next=${encodeURIComponent(next)}`;
-  if (process.env.RESEND_API_KEY) {
-    // real send would go here
-  } else {
-    console.log(`\n──────── MAGIC LINK (demo mode) ────────\nto:  ${link.email}\nurl: ${url}\n────────────────────────────────────────\n`);
-  }
-  ok(res, { ok: true, message: "if that email exists, a link is on its way." });
+  ok(res, { ok: true, message: "if that email exists, a code is on its way." });
 }));
 
-// GET /api/auth/verify?token=&next=/account — consume, sign in, redirect to frontend
-router.get("/verify", wrap(async (req, res) => {
-  const token = req.query.token;
-  const next = safeNext(req.query.next);
-  if (!token) return res.redirect(`${CLIENT_URL}/login?error=missing-token`);
-  const link = await consumeMagicLink(String(token));
-  if (!link) return res.redirect(`${CLIENT_URL}/login?error=expired`);
-  const user = await getOrCreateUser(link.email);
+// POST /api/auth/verify-otp — verify the code, sign in, fold in the guest cart
+router.post("/verify-otp", otpLimiter, wrap(async (req, res) => {
+  const email = req.body?.email;
+  const code = req.body?.code;
+  const next = safeNext(req.body?.next);
+  if (!email || !code) return badRequest(res, "email and code required");
+
+  const result = await verifyOtp(email, code);
+  if (!result.ok) return badRequest(res, otpErrorMessage(result.reason), { reason: result.reason });
+
+  const user = await getOrCreateUser(email);
   // Fold the guest's cart/wishlist/orders into the account before the
   // anonymous session cookie stops being consulted (getScopedId() switches
   // to user.id the moment kynq_auth is set below).
   const { sessionId: anonSessionId } = getOrCreateSession(req, res);
   await mergeAnonymousIntoUser(anonSessionId, user.id);
   await signIn(res, user.id);
-  res.redirect(`${CLIENT_URL}${next}`);
+  ok(res, { ok: true, user, next });
 }));
+
+function otpErrorMessage(reason) {
+  switch (reason) {
+    case "wrong_code": return "that code's wrong. try again?";
+    case "expired": return "that code expired. request a new one.";
+    case "too_many_attempts": return "too many wrong tries. request a new code.";
+    case "no_code": return "request a code first.";
+    default: return "couldn't verify that code.";
+  }
+}
 
 // GET /api/auth/me
 router.get("/me", wrap(async (req, res) => {
