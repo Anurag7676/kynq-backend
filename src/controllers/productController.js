@@ -339,30 +339,35 @@ const getProducts = async (req, res) => {
     if (req.query.category || req.query.categories) {
       // Support both single 'category' and multiple 'categories' parameters
       const categoryParam = req.query.categories || req.query.category;
-      const categoryIds = categoryParam.includes(',') 
+      const categoryIds = categoryParam.includes(',')
         ? categoryParam.split(',').map(id => id.trim())
         : [categoryParam];
-      
+
       // If single category, use simple logic
       if (categoryIds.length === 1) {
         const categoryId = categoryIds[0];
-        
+
         // Check if this is a parent category (has subcategories)
-        const category = await Category.findById(categoryId);
+        // The kynq storefront sends category slugs (e.g. "decor"), not
+        // Mongo ObjectIds — findById() would throw a CastError for those,
+        // so resolve by slug whenever the value isn't a valid ObjectId.
+        const category = mongoose.Types.ObjectId.isValid(categoryId)
+          ? await Category.findById(categoryId)
+          : await Category.findOne({ slug: categoryId });
         if (category) {
           // Check if this category has subcategories
-          const subcategories = await Category.find({ parent: categoryId });
-          
+          const subcategories = await Category.find({ parent: category._id });
+
           if (subcategories.length > 0) {
             // This is a parent category - include products from parent AND all subcategories
-            const allCategoryIds = [categoryId, ...subcategories.map(sub => sub._id)];
+            const allCategoryIds = [category._id, ...subcategories.map(sub => sub._id)];
             filter.$or = [
               { category: { $in: allCategoryIds } },
               { subcategory: { $in: allCategoryIds } }
             ];
           } else {
             // This is a subcategory or category without children - filter by exact category
-            filter.category = categoryId;
+            filter.category = category._id;
           }
         } else {
           // Category not found, return empty results
@@ -371,26 +376,28 @@ const getProducts = async (req, res) => {
       } else {
         // Multiple categories - expand each to include subcategories
         const allCategoryIds = [];
-        
+
         for (const categoryId of categoryIds) {
-          const category = await Category.findById(categoryId);
+          const category = mongoose.Types.ObjectId.isValid(categoryId)
+            ? await Category.findById(categoryId)
+            : await Category.findOne({ slug: categoryId });
           if (category) {
             // Check if this category has subcategories
-            const subcategories = await Category.find({ parent: categoryId });
-            
+            const subcategories = await Category.find({ parent: category._id });
+
             if (subcategories.length > 0) {
               // This is a parent category - include parent and all subcategories
-              allCategoryIds.push(categoryId, ...subcategories.map(sub => sub._id));
+              allCategoryIds.push(category._id, ...subcategories.map(sub => sub._id));
             } else {
               // This is a subcategory or category without children
-              allCategoryIds.push(categoryId);
+              allCategoryIds.push(category._id);
             }
           } else {
             // Category not found, still include the ID
             allCategoryIds.push(categoryId);
           }
         }
-        
+
         // Remove duplicates
         const uniqueCategoryIds = [...new Set(allCategoryIds)];
         filter.$or = [
