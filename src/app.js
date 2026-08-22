@@ -57,6 +57,15 @@ dotenv.config();
 
 const app = express();
 
+// Production runs behind a single reverse proxy (nginx). Without this,
+// express-rate-limit refuses to trust X-Forwarded-For and throws
+// ERR_ERL_UNEXPECTED_X_FORWARDED_FOR on every rate-limited request — it's a
+// safety guard against a spoofed header bypassing per-IP limits, but with
+// no trust proxy setting it can't tell a real proxy from a spoofing client.
+// "1" = trust exactly one hop in front of Express, matching a single nginx
+// reverse proxy. Harmless locally (no proxy in front, header usually absent).
+app.set("trust proxy", 1);
+
 // Regular body parsing middleware for most routes
 // Skip body parsing for webhook routes to preserve raw body for signature verification
 const RAW_BODY_ROUTES = ["/api/payments/webhook", "/api/webhooks/stripe", "/api/webhooks/cashfree"];
