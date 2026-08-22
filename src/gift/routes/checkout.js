@@ -4,6 +4,7 @@ import { getScopedId } from "../session.js";
 import { computeTotals, createOrder, setOrderStatus, updateOrder } from "../orders-store.js";
 import { ok, created, badRequest, unauthorized, wrap } from "../http.js";
 import { cashfreeConfigured, cashfreeMode, createCashfreeOrder } from "../cashfree.js";
+import { sendOrderConfirmationEmail } from "../order-email.js";
 
 const router = express.Router();
 const carts = collection("carts");
@@ -40,8 +41,9 @@ router.post("/session", wrap(async (req, res) => {
 
   if (!cashfreeConfigured) {
     // Demo mode — mark paid, clear cart, return confirmation url directly.
-    await setOrderStatus(order.id, "paid", "demo mode: no Cashfree keys configured");
+    const paidOrder = await setOrderStatus(order.id, "paid", "demo mode: no Cashfree keys configured");
     await carts.set(scopedId, { sessionId: scopedId, items: [], itemCount: 0, subtotal: 0, currency: "INR", updatedAt: Date.now() });
+    sendOrderConfirmationEmail(paidOrder).catch((err) => console.error("[checkout] confirmation email failed:", err.message));
     return created(res, { url: successUrl, orderId: order.id, mode: "demo" });
   }
 

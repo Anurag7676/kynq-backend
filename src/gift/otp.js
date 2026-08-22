@@ -5,6 +5,7 @@
 import crypto from "crypto";
 import { collection } from "./store.js";
 import { sendEmail } from "../config/emailConfig.js";
+import { renderEmailLayout, eyebrow, heading, paragraph, COLORS, MONO_FONT } from "./email-layout.js";
 
 const otps = collection("otps");
 
@@ -18,8 +19,25 @@ function generateCode() {
 
 function otpEmail(code) {
   const text = `your kynq sign-in code: ${code}\n\nexpires in 10 minutes. if you didn't request this, ignore this email.`;
-  const html = `<p>your kynq sign-in code:</p><p style="font-size:28px;font-weight:600;letter-spacing:4px;">${code}</p><p>expires in 10 minutes. if you didn't request this, ignore this email.</p>`;
-  return { subject: "your kynq sign-in code", text, html };
+
+  const codeBlock = `
+    <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 20px;">
+      <tr>
+        <td style="background:${COLORS.estate};border:1px solid ${COLORS.estateEdge};border-radius:14px;padding:18px 24px;">
+          <span style="font-family:${MONO_FONT};font-size:32px;font-weight:600;letter-spacing:10px;color:${COLORS.ink};">${code}</span>
+        </td>
+      </tr>
+    </table>`;
+
+  const bodyHtml = `
+    ${eyebrow("sign in")}
+    ${heading("your code is ready.")}
+    ${paragraph("enter this in the tab where you started signing in:")}
+    ${codeBlock}
+    ${paragraph("expires in 10 minutes. if you didn't request this, ignore this email — no action needed.")}
+  `;
+
+  return { subject: "your kynq sign-in code", text, html: renderEmailLayout({ preheader: `Your sign-in code: ${code}`, bodyHtml }) };
 }
 
 export async function requestOtp(email) {
