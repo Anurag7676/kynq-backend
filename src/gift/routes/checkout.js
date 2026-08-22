@@ -2,7 +2,7 @@ import express from "express";
 import { collection } from "../store.js";
 import { getScopedId } from "../session.js";
 import { computeTotals, createOrder, setOrderStatus, updateOrder } from "../orders-store.js";
-import { ok, created, badRequest, wrap } from "../http.js";
+import { ok, created, badRequest, unauthorized, wrap } from "../http.js";
 import { cashfreeConfigured, cashfreeMode, createCashfreeOrder } from "../cashfree.js";
 
 const router = express.Router();
@@ -16,6 +16,9 @@ router.post("/session", wrap(async (req, res) => {
   if (cashfreeConfigured && !b.customer?.phone) return badRequest(res, "customer phone required");
 
   const { scopedId, userId } = await getScopedId(req, res);
+  // Checkout requires an account — enforced here, not just in the UI, since
+  // the UI gate alone is trivially bypassed with a direct API call.
+  if (!userId) return unauthorized(res, "sign in to check out");
   const cart = (await carts.get(scopedId)) ?? { items: [] };
   if (!cart.items || cart.items.length === 0) return badRequest(res, "cart is empty");
 

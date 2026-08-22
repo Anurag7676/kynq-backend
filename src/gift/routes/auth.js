@@ -2,24 +2,34 @@ import express from "express";
 import { collection } from "../store.js";
 import {
   createMagicLink, consumeMagicLink, getOrCreateUser, saveUser,
-  signIn, signOut, getCurrentUser,
+  signIn, signOut, getCurrentUser, getOrCreateSession,
 } from "../session.js";
+import { mergeAnonymousIntoUser } from "../merge.js";
 import { ok, badRequest, unauthorized, wrap } from "../http.js";
 
 const router = express.Router();
 const users = collection("users");
 const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:3000";
 
+// Only allow redirecting back into our own app — a `next` value is
+// user-supplied (comes back through an emailed link), so treat it as
+// untrusted and restrict it to a same-app relative path.
+function safeNext(raw) {
+  if (typeof raw !== "string" || !raw.startsWith("/") || raw.startsWith("//")) return "/account";
+  return raw;
+}
+
 // POST /api/auth/request-link — mint a magic link, "send" it (logged in dev)
 router.post("/request-link", wrap(async (req, res) => {
   const email = req.body?.email;
   const name = req.body?.name;
+  const next = safeNext(req.body?.next);
   if (!email || !/.+@.+\..+/.test(email)) return badRequest(res, "valid email required");
   const link = await createMagicLink(email);
   if (name) {
     const user = await getOrCreateUser(email, name);
   }
-  const url = `${req.protocol}://${req.get("host")}/api/auth/verify?token=${encodeURIComponent(link.token)}`;
+  const url = `${req.protocol}://${req.get("host")}/api/auth/verify?token=${encodeURIComponent(link.token)}&next=${encodeURIComponent(next)}`;
   if (process.env.RESEND_API_KEY) {
     // real send would go here
   } else {
@@ -31,11 +41,16 @@ router.post("/request-link", wrap(async (req, res) => {
 // GET /api/auth/verify?token=&next=/account — consume, sign in, redirect to frontend
 router.get("/verify", wrap(async (req, res) => {
   const token = req.query.token;
-  const next = req.query.next || "/account";
+  const next = safeNext(req.query.next);
   if (!token) return res.redirect(`${CLIENT_URL}/login?error=missing-token`);
   const link = await consumeMagicLink(String(token));
   if (!link) return res.redirect(`${CLIENT_URL}/login?error=expired`);
   const user = await getOrCreateUser(link.email);
+  // Fold the guest's cart/wishlist/orders into the account before the
+  // anonymous session cookie stops being consulted (getScopedId() switches
+  // to user.id the moment kynq_auth is set below).
+  const { sessionId: anonSessionId } = getOrCreateSession(req, res);
+  await mergeAnonymousIntoUser(anonSessionId, user.id);
   await signIn(res, user.id);
   res.redirect(`${CLIENT_URL}${next}`);
 }));
