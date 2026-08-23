@@ -440,8 +440,9 @@ const getProducts = async (req, res) => {
     }
 
     // Search term - Improved fuzzy matching with better scoring
-    if (req.query.search) {
-      const searchTerm = req.query.search.trim();
+    // The kynq storefront sends ?q=, not ?search= — accept both.
+    if (req.query.search || req.query.q) {
+      const searchTerm = (req.query.search || req.query.q).trim();
       if (searchTerm.length > 0) {
         // For very short searches (1-2 characters), be more restrictive to avoid too many results
         if (searchTerm.length >= 3) {
