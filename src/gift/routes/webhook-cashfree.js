@@ -1,5 +1,5 @@
 import express from "express";
-import { setOrderStatus, getOrder } from "../orders-store.js";
+import { setOrderStatus, markOrderPaid, getOrder } from "../orders-store.js";
 import { collection } from "../store.js";
 import { ok, badRequest, wrap } from "../http.js";
 import { verifyCashfreeWebhookSignature } from "../cashfree.js";
@@ -35,7 +35,7 @@ router.post("/", wrap(async (req, res) => {
 
   if (event.type === "PAYMENT_SUCCESS_WEBHOOK") {
     if (order.status !== "paid") {
-      const paidOrder = await setOrderStatus(orderId, "paid", `cashfree payment ${event.data.payment?.cf_payment_id}`);
+      const paidOrder = await markOrderPaid(orderId, `cashfree payment ${event.data.payment?.cf_payment_id}`);
       await carts.set(order.sessionId, { sessionId: order.sessionId, items: [], itemCount: 0, subtotal: 0, currency: "INR", updatedAt: Date.now() });
       sendOrderConfirmationEmail(paidOrder).catch((err) => console.error("[webhook:cashfree] confirmation email failed:", err.message));
     }

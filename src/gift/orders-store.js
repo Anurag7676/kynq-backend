@@ -1,11 +1,18 @@
 import { collection, makeId } from "./store.js";
+import { redeemCoupon } from "./coupons.js";
 
 const orders = collection("orders");
 
 const GST_RATE_INR = 0.18;
 const SHIPPING_USD = 1500;
 
-export function computeTotals(items) {
+// discount (major currency unit, already resolved server-side via
+// evaluateCoupon — never a client-supplied amount) is taken off the
+// subtotal before tax, matching how GST is actually charged on a
+// discounted sale. It's applied against dueToday only — kynq has no live
+// made-to-order/deposit product today (the dueLater branch below is dead
+// in practice), so there's no real deposit split to prorate it across.
+export function computeTotals(items, discount = 0) {
   const currency = items[0]?.currency ?? "INR";
   let subtotal = 0, dueToday = 0, dueLater = 0;
   for (const it of items) {
@@ -18,11 +25,12 @@ export function computeTotals(items) {
       dueToday += line;
     }
   }
+  const discountedSubtotal = Math.max(0, subtotal - discount);
   const shipping = currency === "INR" ? 0 : SHIPPING_USD;
-  const tax = Math.round(subtotal * (currency === "INR" ? GST_RATE_INR : 0));
-  const total = subtotal + shipping + tax;
-  dueToday += shipping + tax;
-  return { subtotal, shipping, tax, total, dueToday, dueLater, currency };
+  const tax = Math.round(discountedSubtotal * (currency === "INR" ? GST_RATE_INR : 0));
+  const total = discountedSubtotal + shipping + tax;
+  dueToday = Math.max(0, dueToday - discount) + shipping + tax;
+  return { subtotal, discount, shipping, tax, total, dueToday, dueLater, currency };
 }
 
 export async function createOrder(input) {
@@ -41,6 +49,19 @@ export async function setOrderStatus(id, status, note) {
   const next = { ...existing, status, updatedAt: now, events: [...(existing.events ?? []), { at: now, kind: `status:${status}`, note }] };
   await orders.set(id, next);
   return next;
+}
+// The single place an order actually transitions to "paid" — every payment
+// path (demo mode, Cashfree webhook, GET /orders/:id reconciliation) should
+// call this instead of setOrderStatus directly, so a coupon only ever gets
+// redeemed once money has actually landed, not at checkout-session creation.
+export async function markOrderPaid(id, note) {
+  const order = await setOrderStatus(id, "paid", note);
+  if (order?.coupon?.code) {
+    await redeemCoupon(order.coupon.code).catch((err) =>
+      console.error(`[orders] coupon redemption failed for ${order.coupon.code}:`, err.message)
+    );
+  }
+  return order;
 }
 export async function updateOrder(id, patch) {
   const existing = await orders.get(id);

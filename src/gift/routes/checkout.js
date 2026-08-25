@@ -1,10 +1,11 @@
 import express from "express";
 import { collection } from "../store.js";
 import { getScopedId, syncProfileFromCheckout } from "../session.js";
-import { computeTotals, createOrder, setOrderStatus, updateOrder } from "../orders-store.js";
+import { computeTotals, createOrder, markOrderPaid, setOrderStatus, updateOrder } from "../orders-store.js";
 import { ok, created, badRequest, unauthorized, wrap } from "../http.js";
 import { cashfreeConfigured, cashfreeMode, createCashfreeOrder } from "../cashfree.js";
 import { sendOrderConfirmationEmail } from "../order-email.js";
+import { evaluateCoupon } from "../coupons.js";
 
 const router = express.Router();
 const carts = collection("carts");
@@ -29,13 +30,27 @@ router.post("/session", wrap(async (req, res) => {
   // account, not the order.
   await syncProfileFromCheckout(userId, { name: b.customer.name, address: b.shippingAddress });
 
-  const totals = computeTotals(cart.items);
+  // Re-validate the coupon against this cart server-side — never trust a
+  // discount amount from the client. Invalid/expired/exhausted codes fail
+  // the whole checkout rather than silently charging full price, so the
+  // customer isn't surprised by a total that doesn't match what they saw.
+  let discount = 0;
+  let coupon;
+  if (b.couponCode) {
+    const result = await evaluateCoupon(b.couponCode, cart.subtotal);
+    if (!result.valid) return badRequest(res, result.reason);
+    discount = result.discount;
+    coupon = { code: result.coupon.code, percentOff: result.coupon.percentOff, discount };
+  }
+
+  const totals = computeTotals(cart.items, discount);
   const order = await createOrder({
     sessionId: scopedId,
     userId: userId ?? undefined,
     status: "pending_payment",
     items: cart.items,
-    subtotal: totals.subtotal, shipping: totals.shipping, tax: totals.tax, total: totals.total,
+    subtotal: totals.subtotal, discount: totals.discount, coupon,
+    shipping: totals.shipping, tax: totals.tax, total: totals.total,
     amountDueToday: totals.dueToday, amountDueLater: totals.dueLater, currency: totals.currency,
     customer: { name: b.customer.name, email: b.customer.email, phone: b.customer.phone },
     shippingAddress: b.shippingAddress
@@ -47,7 +62,7 @@ router.post("/session", wrap(async (req, res) => {
 
   if (!cashfreeConfigured) {
     // Demo mode — mark paid, clear cart, return confirmation url directly.
-    const paidOrder = await setOrderStatus(order.id, "paid", "demo mode: no Cashfree keys configured");
+    const paidOrder = await markOrderPaid(order.id, "demo mode: no Cashfree keys configured");
     await carts.set(scopedId, { sessionId: scopedId, items: [], itemCount: 0, subtotal: 0, currency: "INR", updatedAt: Date.now() });
     sendOrderConfirmationEmail(paidOrder).catch((err) => console.error("[checkout] confirmation email failed:", err.message));
     return created(res, { url: successUrl, orderId: order.id, mode: "demo" });

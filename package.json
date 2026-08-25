@@ -10,7 +10,8 @@
     "start:gift": "node src/gift/server.js",
     "dev:gift": "node --watch src/gift/server.js",
     "test": "echo \"Error: no test specified\" && exit 1",
-    "check-tax": "node check-stripe-tax-config.js"
+    "check-tax": "node check-stripe-tax-config.js",
+    "coupon": "node src/gift/generate-coupon.js"
   },
   "keywords": [],
   "author": "",

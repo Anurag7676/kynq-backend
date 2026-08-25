@@ -46,6 +46,7 @@ function orderEmail(order) {
   const totalsHtml = `
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:16px;">
       ${totalRow("subtotal", money(order.subtotal, order.currency))}
+      ${order.discount ? totalRow(`coupon (${order.coupon?.code})`, `−${money(order.discount, order.currency)}`) : ""}
       ${totalRow("shipping", order.shipping === 0 ? "free" : money(order.shipping, order.currency))}
       ${order.tax ? totalRow("taxes", money(order.tax, order.currency)) : ""}
       ${totalRow("paid today", money(order.amountDueToday, order.currency), { strong: true })}

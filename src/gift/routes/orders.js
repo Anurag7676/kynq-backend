@@ -1,7 +1,7 @@
 import express from "express";
 import { collection } from "../store.js";
 import { getOrCreateSession, getCurrentUser } from "../session.js";
-import { getOrder, listOrdersForActor, setOrderStatus } from "../orders-store.js";
+import { getOrder, listOrdersForActor, setOrderStatus, markOrderPaid } from "../orders-store.js";
 import { ok, notFound, badRequest, wrap } from "../http.js";
 import { cashfreeConfigured, getCashfreeOrder } from "../cashfree.js";
 import { sendOrderConfirmationEmail } from "../order-email.js";
@@ -16,7 +16,7 @@ async function reconcileIfPending(order) {
   if (!cashfreeConfigured || order.status !== "pending_payment" || !order.cashfreeOrderId) return order;
   const cf = await getCashfreeOrder(order.cashfreeOrderId).catch(() => null);
   if (cf?.order_status === "PAID") {
-    const updated = await setOrderStatus(order.id, "paid", "reconciled via GET /orders/:id (cashfree order_status=PAID)");
+    const updated = await markOrderPaid(order.id, "reconciled via GET /orders/:id (cashfree order_status=PAID)");
     await carts.set(order.sessionId, { sessionId: order.sessionId, items: [], itemCount: 0, subtotal: 0, currency: "INR", updatedAt: Date.now() });
     sendOrderConfirmationEmail(updated).catch((err) => console.error("[orders] confirmation email failed:", err.message));
     return updated;
