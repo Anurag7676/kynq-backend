@@ -11,7 +11,8 @@
     "dev:gift": "node --watch src/gift/server.js",
     "test": "echo \"Error: no test specified\" && exit 1",
     "check-tax": "node check-stripe-tax-config.js",
-    "coupon": "node src/gift/generate-coupon.js"
+    "coupon": "node src/gift/generate-coupon.js",
+    "tag-occasions": "node src/scripts/tag-occasions.js"
   },
   "keywords": [],
   "author": "",
