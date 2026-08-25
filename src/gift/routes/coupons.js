@@ -25,7 +25,9 @@ router.post("/validate", wrap(async (req, res) => {
 
   ok(res, {
     code: result.coupon.code,
+    type: result.coupon.type,
     percentOff: result.coupon.percentOff,
+    amountOff: result.coupon.amountOff,
     discount: result.discount,
     subtotal: cart.subtotal,
   });

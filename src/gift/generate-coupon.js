@@ -1,12 +1,15 @@
-// Generate one or more percentage-off coupon codes.
+// Generate one or more coupon codes — percentage-off or a flat rupee
+// amount off.
 //
 // Usage:
 //   node src/gift/generate-coupon.js --percent 20 --code SUMMER20
+//   node src/gift/generate-coupon.js --amount 100 --code ZEROASSIST
 //   node src/gift/generate-coupon.js --percent 20 --code SUMMER20 --expires 2026-09-30 --max 100 --min 500
 //   node src/gift/generate-coupon.js --percent 15 --count 50 --prefix WELCOME   (50 unique single-use codes)
 //
 // Flags:
-//   --percent   required, 1-100
+//   --percent   percentage off, 1-100 — exactly one of --percent/--amount required
+//   --amount    flat rupees off (e.g. --amount 100 = ₹100 off), capped at the cart subtotal
 //   --code      coupon code (default: random if omitted, or the --prefix + random)
 //   --count     how many codes to generate (default 1)
 //   --prefix    prefix for auto-generated codes, e.g. WELCOME -> WELCOME-A1B2C3
@@ -39,14 +42,30 @@ function randomCode(prefix) {
 
 function usage() {
   console.error(
-    "usage: node src/gift/generate-coupon.js --percent <1-100> [--code CODE] [--count N] " +
-    "[--prefix TEXT] [--expires YYYY-MM-DD] [--max N] [--min N]"
+    "usage: node src/gift/generate-coupon.js (--percent <1-100> | --amount <rupees>) [--code CODE] " +
+    "[--count N] [--prefix TEXT] [--expires YYYY-MM-DD] [--max N] [--min N]"
   );
 }
 
 const args = parseArgs(process.argv.slice(2));
-const percentOff = Number(args.percent);
-if (!(percentOff > 0 && percentOff <= 100)) {
+if (args.percent != null && args.amount != null) {
+  console.error("pass --percent or --amount, not both");
+  usage();
+  process.exit(1);
+}
+const percentOff = args.percent != null ? Number(args.percent) : null;
+const amountOff = args.amount != null ? Number(args.amount) : null;
+if (percentOff != null && !(percentOff > 0 && percentOff <= 100)) {
+  console.error(`invalid --percent: ${args.percent} (must be 1-100)`);
+  usage();
+  process.exit(1);
+}
+if (amountOff != null && !(amountOff > 0)) {
+  console.error(`invalid --amount: ${args.amount} (must be > 0)`);
+  usage();
+  process.exit(1);
+}
+if (percentOff == null && amountOff == null) {
   usage();
   process.exit(1);
 }
@@ -75,14 +94,15 @@ const created = [];
 for (let i = 0; i < count; i++) {
   const code = count === 1 && args.code ? args.code : randomCode(args.prefix || args.code);
   try {
-    const coupon = await createCoupon({ code, percentOff, expiresAt, maxRedemptions, minSubtotal });
+    const coupon = await createCoupon({ code, percentOff, amountOff, expiresAt, maxRedemptions, minSubtotal });
     created.push(coupon.code);
   } catch (err) {
     console.error(`  skipped ${code}: ${err.message}`);
   }
 }
 
-console.log(`\ncreated ${created.length}/${count} coupon(s) — ${percentOff}% off` +
+const discountLabel = percentOff != null ? `${percentOff}% off` : `₹${amountOff} off`;
+console.log(`\ncreated ${created.length}/${count} coupon(s) — ${discountLabel}` +
   (expiresAt ? `, expires ${args.expires}` : "") +
   (maxRedemptions ? `, max ${maxRedemptions} use(s) each` : "") +
   (minSubtotal ? `, min order ₹${minSubtotal}` : "") + ":\n");

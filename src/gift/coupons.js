@@ -1,5 +1,6 @@
-// Percentage-off coupon codes. Ports the collection() pattern used
-// everywhere else in the gift API — documents keyed by normalized code.
+// Coupon codes — either percentage-off or a flat rupee amount off. Ports
+// the collection() pattern used everywhere else in the gift API —
+// documents keyed by normalized code.
 import { collection } from "./store.js";
 
 const coupons = collection("coupons");
@@ -12,15 +13,23 @@ export async function getCoupon(code) {
   return coupons.get(normalizeCode(code));
 }
 
-export async function createCoupon({ code, percentOff, expiresAt, maxRedemptions, minSubtotal }) {
+// Exactly one of percentOff (1-100) / amountOff (rupees, > 0) must be set.
+export async function createCoupon({ code, percentOff, amountOff, expiresAt, maxRedemptions, minSubtotal }) {
   const normalized = normalizeCode(code);
   if (!normalized) throw new Error("code required");
-  if (!(percentOff > 0 && percentOff <= 100)) throw new Error("percentOff must be between 1 and 100");
+  if (percentOff != null && amountOff != null) throw new Error("pass percentOff or amountOff, not both");
+  if (percentOff == null && amountOff == null) throw new Error("percentOff or amountOff required");
+  if (percentOff != null && !(percentOff > 0 && percentOff <= 100)) {
+    throw new Error("percentOff must be between 1 and 100");
+  }
+  if (amountOff != null && !(amountOff > 0)) throw new Error("amountOff must be greater than 0");
   const existing = await coupons.get(normalized);
   if (existing) throw new Error(`coupon ${normalized} already exists`);
   const coupon = {
     code: normalized,
-    percentOff,
+    type: percentOff != null ? "percent" : "flat",
+    percentOff: percentOff ?? null,
+    amountOff: amountOff ?? null,
     active: true,
     expiresAt: expiresAt ?? null,
     maxRedemptions: maxRedemptions ?? null,
@@ -48,7 +57,11 @@ export async function evaluateCoupon(code, subtotal) {
   if (coupon.minSubtotal && subtotal < coupon.minSubtotal) {
     return { valid: false, reason: `add ₹${coupon.minSubtotal - subtotal} more to use this coupon` };
   }
-  const discount = Math.round(subtotal * (coupon.percentOff / 100));
+  // Flat discounts are capped at the subtotal — a ₹100-off code against a
+  // ₹60 cart takes ₹60 off, not into negative territory.
+  const discount = coupon.type === "flat"
+    ? Math.min(coupon.amountOff, subtotal)
+    : Math.round(subtotal * (coupon.percentOff / 100));
   return { valid: true, coupon, discount };
 }
 

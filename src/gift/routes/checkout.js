@@ -44,7 +44,13 @@ router.post("/session", wrap(async (req, res) => {
     const result = await evaluateCoupon(b.couponCode, cart.subtotal);
     if (!result.valid) return badRequest(res, result.reason);
     discount = result.discount;
-    coupon = { code: result.coupon.code, percentOff: result.coupon.percentOff, discount };
+    coupon = {
+      code: result.coupon.code,
+      type: result.coupon.type,
+      percentOff: result.coupon.percentOff,
+      amountOff: result.coupon.amountOff,
+      discount,
+    };
   }
 
   const totals = computeTotals(cart.items, discount);
