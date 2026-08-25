@@ -3,13 +3,15 @@ import { redeemCoupon } from "./coupons.js";
 
 const orders = collection("orders");
 
-const GST_RATE_INR = 0.18;
 const SHIPPING_USD = 1500;
 
+// Listed prices are tax-inclusive (GST is already baked into unitPrice, not
+// billed on top at checkout) — so `tax` stays 0 and is kept only so
+// anything still reading order.tax doesn't break.
+//
 // discount (major currency unit, already resolved server-side via
 // evaluateCoupon — never a client-supplied amount) is taken off the
-// subtotal before tax, matching how GST is actually charged on a
-// discounted sale. It's applied against dueToday only — kynq has no live
+// subtotal. It's applied against dueToday only — kynq has no live
 // made-to-order/deposit product today (the dueLater branch below is dead
 // in practice), so there's no real deposit split to prorate it across.
 export function computeTotals(items, discount = 0) {
@@ -27,7 +29,7 @@ export function computeTotals(items, discount = 0) {
   }
   const discountedSubtotal = Math.max(0, subtotal - discount);
   const shipping = currency === "INR" ? 0 : SHIPPING_USD;
-  const tax = Math.round(discountedSubtotal * (currency === "INR" ? GST_RATE_INR : 0));
+  const tax = 0;
   const total = discountedSubtotal + shipping + tax;
   dueToday = Math.max(0, dueToday - discount) + shipping + tax;
   return { subtotal, discount, shipping, tax, total, dueToday, dueLater, currency };
