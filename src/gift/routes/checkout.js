@@ -9,7 +9,11 @@ import { evaluateCoupon } from "../coupons.js";
 
 const router = express.Router();
 const carts = collection("carts");
-const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:3000";
+// Prod default; CLIENT_URL overrides for local dev. This drives the
+// post-payment successUrl Cashfree redirects to — same bug class as the
+// confirmation email's "view your order" link (see email-layout.js): with
+// no CLIENT_URL set in production, this silently fell back to localhost.
+const CLIENT_URL = process.env.CLIENT_URL || "https://kynq.in";
 
 // POST /api/checkout/session
 router.post("/session", wrap(async (req, res) => {

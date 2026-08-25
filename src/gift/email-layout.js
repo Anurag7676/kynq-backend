@@ -19,7 +19,11 @@ const COLORS = {
 const DISPLAY_FONT = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
 const MONO_FONT = "'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace";
 
-const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:3000";
+// Prod default; CLIENT_URL overrides for local dev. Falling back to
+// localhost here was the actual cause of "view your order" going nowhere
+// real for customers — the production backend never had CLIENT_URL set, so
+// every confirmation email linked to the developer's own machine.
+const CLIENT_URL = process.env.CLIENT_URL || "https://kynq.in";
 const LOGO_URL = `${CLIENT_URL}/images/kynq-logo.png`;
 
 export function eyebrow(text) {
