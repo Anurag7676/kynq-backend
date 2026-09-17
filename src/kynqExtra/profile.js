@@ -126,3 +126,12 @@ export async function isAgeGateCleared(userId) {
   const user = await findUserById(userId);
   return !!(user?.ageVerified && user?.dob);
 }
+
+// Minimal, safe-to-expose info about ANOTHER user — just enough for the
+// 7-Day Challenge UI to show who you're challenging instead of a raw id.
+// Deliberately excludes email, dob, and everything else in the account.
+export async function getPublicName(userId) {
+  const user = await findUserById(userId);
+  if (!user) return null;
+  return { id: user.id, name: user.name || "someone" };
+}

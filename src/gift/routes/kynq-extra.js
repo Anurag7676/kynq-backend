@@ -1,7 +1,7 @@
 import express from "express";
 import { getScopedId } from "../session.js";
 import { ok, created, badRequest, unauthorized, forbidden, wrap } from "../http.js";
-import { getExtraProfile, setExtraProfile, INTEREST_TOPICS, LOCATION_SCOPES, INDIAN_CITIES } from "../../kynqExtra/profile.js";
+import { getExtraProfile, setExtraProfile, getPublicName, INTEREST_TOPICS, LOCATION_SCOPES, INDIAN_CITIES } from "../../kynqExtra/profile.js";
 import { mintTurnCredentials, turnConfigured } from "../../kynqExtra/turnCredentials.js";
 import { listOpenReports, reviewReport, setRestricted } from "../../kynqExtra/reports.js";
 import { searchGifs, trendingGifs, giphyConfigured } from "../../kynqExtra/giphy.js";
@@ -35,6 +35,16 @@ router.get("/cities", wrap(async (req, res) => {
 // GET /api/kynq-extra/prompt-categories — for the Prompts picker.
 router.get("/prompt-categories", wrap(async (req, res) => {
   ok(res, { categories: PROMPT_CATEGORIES });
+}));
+
+// GET /api/kynq-extra/users/:id/public — just {id, name}, nothing else,
+// so the challenge UI can show who you're dealing with.
+router.get("/users/:id/public", wrap(async (req, res) => {
+  const { userId } = await getScopedId(req, res);
+  if (!userId) return unauthorized(res, "sign in to use kynq extra");
+  const profile = await getPublicName(req.params.id);
+  if (!profile) return badRequest(res, "user not found");
+  ok(res, { user: profile });
 }));
 
 router.get("/profile", wrap(async (req, res) => {
