@@ -7,7 +7,7 @@ import { resolveSocketIdentity } from "./socketAuth.js";
 import { isAgeGateCleared } from "./profile.js";
 import { isRestricted } from "./reports.js";
 import * as matchmaker from "./matchmaker.js";
-import { getCall, endCall, createGameSession, getGameSession, updateGameSession } from "./calls-store.js";
+import { getCall, endCall, findActiveCallForUser, createGameSession, getGameSession, updateGameSession } from "./calls-store.js";
 import { GAME_TYPES, TURN_BASED_GAMES, createInitialState, applyMove, redactState } from "./games.js";
 import { addChatMessage, markMessageStatus, setReaction } from "./chat-store.js";
 import { getRandomPrompt } from "./prompts.js";
@@ -33,8 +33,8 @@ async function leaveActiveCall(io, socket, reason) {
   if (!callId) return;
   const peerScopedId = socket.data.peerScopedId;
 
-  socket.to(callId).emit("call:ended", { reason });
   await endCall(callId, reason).catch((err) => console.error("[kynqExtra] endCall failed:", err));
+  socket.to(callId).emit("call:ended", { reason });
 
   socket.leave(callId);
   socket.data.currentCallId = null;
@@ -44,6 +44,65 @@ async function leaveActiveCall(io, socket, reason) {
   // clear it via a broadcast the peer's handler listens for below.
   io.to(callId).emit("call:_clear_state", {});
   void peerScopedId;
+}
+
+// ─── Reconnection grace period ──────────────────────────────
+// A dropped socket (wifi blip, backgrounded tab, brief network hiccup)
+// used to end the call INSTANTLY, which is far too harsh — most real-world
+// disconnects are transient. Instead: the peer is told the connection is
+// shaky, and the disconnected side gets RECONNECT_GRACE_MS to reconnect
+// before the call actually ends. scopedId -> { callId, peerScopedId, timer }
+const RECONNECT_GRACE_MS = Number(process.env.KYNQ_RECONNECT_GRACE_MS) || 20_000;
+const pendingDisconnects = new Map();
+
+function scheduleGraceEnd(io, scopedId, callId, peerScopedId) {
+  const timer = setTimeout(async () => {
+    pendingDisconnects.delete(scopedId);
+    await endCall(callId, "peer_disconnected").catch((err) => console.error("[kynqExtra] endCall failed:", err));
+    io.to(callId).emit("call:ended", { reason: "peer_disconnected" });
+    io.to(callId).emit("call:_clear_state", {});
+  }, RECONNECT_GRACE_MS);
+  pendingDisconnects.set(scopedId, { callId, peerScopedId, timer });
+}
+
+// Called right after a fresh socket authenticates — if this scopedId was
+// mid-grace-period from a very recent disconnect, resume them into the
+// same call instead of leaving them stranded on the matching screen.
+async function tryResumeCall(io, socket) {
+  const scopedId = socket.data.scopedId;
+  const pending = pendingDisconnects.get(scopedId);
+  let callId, peerScopedId;
+
+  if (pending) {
+    clearTimeout(pending.timer);
+    pendingDisconnects.delete(scopedId);
+    ({ callId, peerScopedId } = pending);
+  } else {
+    // No in-memory record — either this socket never dropped (nothing to
+    // resume, the common case) or the server process itself restarted
+    // mid-call (e.g. a deploy, or --watch reloading in dev) and lost the
+    // grace-period map entirely. The DB-backed active-call record survives
+    // that, so fall back to it rather than stranding a genuinely-still-
+    // in-a-call user with no way back in.
+    const call = await findActiveCallForUser(scopedId).catch(() => null);
+    if (!call) return;
+    callId = call.id;
+    peerScopedId = call.participantA === scopedId ? call.participantB : call.participantA;
+  }
+
+  socket.join(callId);
+  socket.data.currentCallId = callId;
+  socket.data.peerScopedId = peerScopedId;
+
+  // Tell the reconnecting client which call/peer to resume, and tell
+  // whoever's still in the room that the peer is back — both sides then
+  // redo the WebRTC offer/answer from scratch (see the plan's game-state
+  // pattern of never trusting stale client state — same principle here:
+  // a fresh ICE/SDP exchange is the only reliable way to recover a media
+  // connection after a signaling drop, rather than assuming the old
+  // RTCPeerConnection is still usable).
+  socket.emit("call:resumed", { callId, peerScopedId, initiator: true });
+  socket.to(callId).emit("call:peer-reconnected", {});
 }
 
 export function initSignaling(server) {
@@ -68,6 +127,7 @@ export function initSignaling(server) {
 
   io.on("connection", (socket) => {
     const { scopedId } = socket.data;
+    tryResumeCall(io, socket);
 
     socket.on("queue:join", async (payload = {}, ack) => {
       try {
@@ -233,9 +293,22 @@ export function initSignaling(server) {
       }
     });
 
-    socket.on("disconnect", async () => {
+    socket.on("disconnect", () => {
       matchmaker.leaveQueue(scopedId);
-      await leaveActiveCall(io, socket, "disconnected");
+      const callId = socket.data.currentCallId;
+      const peerScopedId = socket.data.peerScopedId;
+      if (!callId) return;
+
+      // Grace period, not an instant hangup — a dropped wifi connection or
+      // a backgrounded tab shouldn't end the call. The peer is told the
+      // connection is shaky; if this scopedId doesn't reconnect within
+      // RECONNECT_GRACE_MS, THEN the call actually ends (see
+      // scheduleGraceEnd). socket.data itself is gone once this handler
+      // returns (the socket object is being destroyed), so state that
+      // needs to survive to the timeout lives in pendingDisconnects, not
+      // on the socket.
+      socket.to(callId).emit("call:peer-disconnected", {});
+      scheduleGraceEnd(io, scopedId, callId, peerScopedId);
     });
   });
 

@@ -6,6 +6,7 @@ import { mintTurnCredentials, turnConfigured } from "../../kynqExtra/turnCredent
 import { listOpenReports, reviewReport, setRestricted } from "../../kynqExtra/reports.js";
 import { searchGifs, trendingGifs, giphyConfigured } from "../../kynqExtra/giphy.js";
 import { PROMPT_CATEGORIES } from "../../kynqExtra/prompts.js";
+import { listCallsForUser } from "../../kynqExtra/calls-store.js";
 import {
   proposeChallenge, respondToChallenge, listMyChallenges, getChallenge,
   getQuestionOptions, askQuestion, answerQuestion, answerDayGame, shareMoment,
@@ -78,6 +79,13 @@ router.get("/gifs", wrap(async (req, res) => {
   } catch (err) {
     badRequest(res, err.message);
   }
+}));
+
+// GET /api/kynq-extra/calls — past 1-to-1 calls, most recent first.
+router.get("/calls", wrap(async (req, res) => {
+  const { userId } = await getScopedId(req, res);
+  if (!userId) return unauthorized(res, "sign in to use kynq extra");
+  ok(res, { calls: await listCallsForUser(userId, Number(req.query.limit) || 50) });
 }));
 
 // GET /api/kynq-extra/turn-credentials — short-lived coturn creds, minted

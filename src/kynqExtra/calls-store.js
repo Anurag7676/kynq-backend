@@ -54,6 +54,22 @@ export async function getCall(callId) {
   return calls.get(callId);
 }
 
+// Call history — most recent first, both directions (caller could be
+// participantA or participantB). Used by GET /api/kynq-extra/calls.
+export async function listCallsForUser(scopedId, limit = 50) {
+  const all = await calls.find((c) => c.participantA === scopedId || c.participantB === scopedId);
+  return all.sort((a, b) => b.startedAt - a.startedAt).slice(0, limit);
+}
+
+// Find a still-active call a user is (or very recently was) part of — used
+// by the reconnection grace-period flow to re-associate a fresh socket
+// connection with the call it dropped out of, without the client needing
+// to remember/pass a callId across a full page reload.
+export async function findActiveCallForUser(scopedId) {
+  const all = await calls.find((c) => c.status === "active" && (c.participantA === scopedId || c.participantB === scopedId));
+  return all[0] ?? null;
+}
+
 // Recently-matched pairs are excluded from re-matching for
 // RECENT_MATCH_WINDOW_MS — checked by the matchmaker before pairing two
 // candidates. Cheap because the matchmaking queue itself is small
