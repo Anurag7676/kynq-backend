@@ -36,6 +36,40 @@ export const INTEREST_TOPICS = [
 ];
 export const LOCATION_SCOPES = ["same-city", "same-state", "same-country", "worldwide"];
 
+// kynq operates in India (INR-only throughout the rest of the site), so
+// Kynq Extra's location matching is scoped to Indian cities for V1 rather
+// than a general geocoder — a fixed, curated list, same pattern as
+// INTEREST_TOPICS. State is looked up FROM the city (never trusted as a
+// separate client-supplied field) so "city" and "state" can never disagree.
+export const INDIAN_CITIES = [
+  { city: "Mumbai", state: "Maharashtra" }, { city: "Delhi", state: "Delhi" },
+  { city: "Bangalore", state: "Karnataka" }, { city: "Hyderabad", state: "Telangana" },
+  { city: "Ahmedabad", state: "Gujarat" }, { city: "Chennai", state: "Tamil Nadu" },
+  { city: "Kolkata", state: "West Bengal" }, { city: "Surat", state: "Gujarat" },
+  { city: "Pune", state: "Maharashtra" }, { city: "Jaipur", state: "Rajasthan" },
+  { city: "Lucknow", state: "Uttar Pradesh" }, { city: "Kanpur", state: "Uttar Pradesh" },
+  { city: "Nagpur", state: "Maharashtra" }, { city: "Indore", state: "Madhya Pradesh" },
+  { city: "Thane", state: "Maharashtra" }, { city: "Bhopal", state: "Madhya Pradesh" },
+  { city: "Visakhapatnam", state: "Andhra Pradesh" }, { city: "Patna", state: "Bihar" },
+  { city: "Vadodara", state: "Gujarat" }, { city: "Ghaziabad", state: "Uttar Pradesh" },
+  { city: "Ludhiana", state: "Punjab" }, { city: "Agra", state: "Uttar Pradesh" },
+  { city: "Nashik", state: "Maharashtra" }, { city: "Faridabad", state: "Haryana" },
+  { city: "Meerut", state: "Uttar Pradesh" }, { city: "Rajkot", state: "Gujarat" },
+  { city: "Varanasi", state: "Uttar Pradesh" }, { city: "Srinagar", state: "Jammu and Kashmir" },
+  { city: "Aurangabad", state: "Maharashtra" }, { city: "Dhanbad", state: "Jharkhand" },
+  { city: "Amritsar", state: "Punjab" }, { city: "Navi Mumbai", state: "Maharashtra" },
+  { city: "Prayagraj", state: "Uttar Pradesh" }, { city: "Ranchi", state: "Jharkhand" },
+  { city: "Howrah", state: "West Bengal" }, { city: "Coimbatore", state: "Tamil Nadu" },
+  { city: "Jabalpur", state: "Madhya Pradesh" }, { city: "Gwalior", state: "Madhya Pradesh" },
+  { city: "Vijayawada", state: "Andhra Pradesh" }, { city: "Jodhpur", state: "Rajasthan" },
+  { city: "Madurai", state: "Tamil Nadu" }, { city: "Raipur", state: "Chhattisgarh" },
+  { city: "Kota", state: "Rajasthan" }, { city: "Guwahati", state: "Assam" },
+  { city: "Chandigarh", state: "Chandigarh" }, { city: "Thiruvananthapuram", state: "Kerala" },
+  { city: "Kochi", state: "Kerala" }, { city: "Mysore", state: "Karnataka" },
+  { city: "Noida", state: "Uttar Pradesh" }, { city: "Gurugram", state: "Haryana" },
+];
+const CITY_BY_NAME = new Map(INDIAN_CITIES.map((c) => [c.city, c]));
+
 export async function getExtraProfile(userId) {
   const user = await findUserById(userId);
   if (!user) return null;
@@ -44,6 +78,9 @@ export async function getExtraProfile(userId) {
     ageVerified: !!user.ageVerified,
     interests: user.interests ?? [],
     locationScope: user.locationScope ?? "same-country",
+    city: user.city ?? null,
+    state: user.state ?? null,
+    country: user.city ? "India" : null,
     bio: user.bio ?? "",
   };
 }
@@ -51,7 +88,7 @@ export async function getExtraProfile(userId) {
 // Set once at Kynq Extra onboarding. dob is immutable after the first
 // successful set — resubmitting a different DOB to game the age gate is
 // rejected, not silently overwritten.
-export async function setExtraProfile(userId, { dob, interests, locationScope, bio }) {
+export async function setExtraProfile(userId, { dob, interests, locationScope, city, bio }) {
   const user = await findUserById(userId);
   if (!user) throw new Error("user not found");
 
@@ -71,6 +108,12 @@ export async function setExtraProfile(userId, { dob, interests, locationScope, b
   if (locationScope) {
     if (!LOCATION_SCOPES.includes(locationScope)) throw new Error("invalid location scope");
     patch.locationScope = locationScope;
+  }
+  if (city) {
+    const match = CITY_BY_NAME.get(city);
+    if (!match) throw new Error("unsupported city — pick one from the list");
+    patch.city = match.city;
+    patch.state = match.state;
   }
   if (bio != null) patch.bio = String(bio).slice(0, 200);
 

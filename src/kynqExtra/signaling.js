@@ -8,11 +8,24 @@ import { isAgeGateCleared } from "./profile.js";
 import { isRestricted } from "./reports.js";
 import * as matchmaker from "./matchmaker.js";
 import { getCall, endCall, createGameSession, getGameSession, updateGameSession } from "./calls-store.js";
-import { GAME_TYPES, createInitialState, applyMove } from "./games.js";
+import { GAME_TYPES, TURN_BASED_GAMES, createInitialState, applyMove, redactState } from "./games.js";
+import { addChatMessage, markMessageStatus, setReaction } from "./chat-store.js";
 import { submitReport } from "./reports.js";
 import { blockUser } from "./blocks.js";
 
-const MAX_CHAT_MESSAGE_LENGTH = 1000;
+// Emits a game event to every socket in the call's room, but with the
+// state redacted per-viewer (a quiz's correct answer, Guess the Word's
+// secret) — plain io.to(callId).emit() would leak hidden info to both
+// players identically, defeating the point of having hidden info at all.
+function emitGameEvent(io, callId, gameType, eventName, basePayload) {
+  const roomSockets = io.sockets.adapter.rooms.get(callId);
+  if (!roomSockets) return;
+  for (const socketId of roomSockets) {
+    const sock = io.sockets.sockets.get(socketId);
+    if (!sock) continue;
+    sock.emit(eventName, { ...basePayload, state: redactState(gameType, basePayload.state, sock.data.scopedId) });
+  }
+}
 
 async function leaveActiveCall(io, socket, reason) {
   const callId = socket.data.currentCallId;
@@ -87,11 +100,31 @@ export function initSignaling(server) {
       socket.to(callId).emit("webrtc:signal", { type, payload, from: scopedId });
     });
 
-    socket.on("chat:message", ({ callId, text } = {}, ack) => {
+    // ─── Chat — persisted, with delivery/read receipts and reactions ───
+    socket.on("chat:message", async ({ callId, text, gifUrl } = {}, ack) => {
       if (!callId || callId !== socket.data.currentCallId) return ack?.({ ok: false });
-      const clean = String(text ?? "").slice(0, MAX_CHAT_MESSAGE_LENGTH).trim();
-      if (!clean) return ack?.({ ok: false, reason: "empty message" });
-      io.to(callId).emit("chat:message", { from: scopedId, text: clean, at: Date.now() });
+      const message = await addChatMessage(callId, { from: scopedId, text, gifUrl });
+      if (!message) return ack?.({ ok: false, reason: "empty message" });
+      io.to(callId).emit("chat:message", message);
+      ack?.({ ok: true, id: message.id });
+    });
+
+    // Recipient's client calls this once the message event has actually
+    // arrived (delivered) and again once it's been shown on screen (read) —
+    // markMessageStatus rejects the sender marking their own message,
+    // so a client can't fake receipts for itself.
+    socket.on("chat:ack", async ({ callId, messageId, status } = {}) => {
+      if (!callId || callId !== socket.data.currentCallId) return;
+      if (!["delivered", "read"].includes(status)) return;
+      const updated = await markMessageStatus(callId, messageId, status, scopedId);
+      if (updated) io.to(callId).emit("chat:status", { messageId, status: updated.status });
+    });
+
+    socket.on("chat:react", async ({ callId, messageId, emoji } = {}, ack) => {
+      if (!callId || callId !== socket.data.currentCallId) return ack?.({ ok: false });
+      const updated = await setReaction(callId, messageId, scopedId, emoji || null);
+      if (!updated) return ack?.({ ok: false, reason: "message not found" });
+      io.to(callId).emit("chat:reaction", { messageId, reactions: updated.reactions });
       ack?.({ ok: true });
     });
 
@@ -105,10 +138,10 @@ export function initSignaling(server) {
         if (!call || call.status !== "active") return ack?.({ ok: false, reason: "call not active" });
 
         const initialState = createInitialState(gameType, call.participantA, call.participantB);
-        const firstTurn = ["tic-tac-toe"].includes(gameType) ? call.participantA : null;
+        const firstTurn = TURN_BASED_GAMES.includes(gameType) ? call.participantA : null;
         const session = await createGameSession(callId, gameType, initialState, firstTurn);
 
-        io.to(callId).emit("game:started", {
+        emitGameEvent(io, callId, gameType, "game:started", {
           gameId: session.id,
           gameType,
           state: session.state,
@@ -135,7 +168,7 @@ export function initSignaling(server) {
           status: result.status,
         });
 
-        io.to(callId).emit("game:state", {
+        emitGameEvent(io, callId, session.gameType, "game:state", {
           gameId,
           state: updated.state,
           turnOf: updated.turnOf,

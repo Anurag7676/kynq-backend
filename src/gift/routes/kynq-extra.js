@@ -1,9 +1,10 @@
 import express from "express";
 import { getScopedId } from "../session.js";
 import { ok, created, badRequest, unauthorized, forbidden, wrap } from "../http.js";
-import { getExtraProfile, setExtraProfile, INTEREST_TOPICS, LOCATION_SCOPES } from "../../kynqExtra/profile.js";
+import { getExtraProfile, setExtraProfile, INTEREST_TOPICS, LOCATION_SCOPES, INDIAN_CITIES } from "../../kynqExtra/profile.js";
 import { mintTurnCredentials, turnConfigured } from "../../kynqExtra/turnCredentials.js";
 import { listOpenReports, reviewReport, setRestricted } from "../../kynqExtra/reports.js";
+import { searchGifs, trendingGifs, giphyConfigured } from "../../kynqExtra/giphy.js";
 import { auth } from "../../middleware/authMiddleware.js";
 
 const router = express.Router();
@@ -20,6 +21,12 @@ router.get("/topics", wrap(async (req, res) => {
   ok(res, { topics: INTEREST_TOPICS, locationScopes: LOCATION_SCOPES });
 }));
 
+// GET /api/kynq-extra/cities — the fixed Indian-city list city/state
+// pickers render, server-side source of truth (see profile.js).
+router.get("/cities", wrap(async (req, res) => {
+  ok(res, { cities: INDIAN_CITIES });
+}));
+
 router.get("/profile", wrap(async (req, res) => {
   const { userId } = await getScopedId(req, res);
   if (!userId) return unauthorized(res, "sign in to use kynq extra");
@@ -33,6 +40,21 @@ router.post("/profile", wrap(async (req, res) => {
   try {
     const profile = await setExtraProfile(userId, req.body || {});
     created(res, { profile });
+  } catch (err) {
+    badRequest(res, err.message);
+  }
+}));
+
+// GET /api/kynq-extra/gifs?q=... — search (query given) or trending
+// (no query), backend-proxied so the GIPHY key stays server-side.
+router.get("/gifs", wrap(async (req, res) => {
+  const { userId } = await getScopedId(req, res);
+  if (!userId) return unauthorized(res, "sign in to use kynq extra");
+  if (!giphyConfigured) return ok(res, { configured: false, gifs: [] });
+  const q = String(req.query.q || "").trim();
+  try {
+    const gifs = q ? await searchGifs(q) : await trendingGifs();
+    ok(res, { configured: true, gifs });
   } catch (err) {
     badRequest(res, err.message);
   }
