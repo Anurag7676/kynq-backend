@@ -18,16 +18,17 @@ async function getOrCreate(callId) {
   return fresh;
 }
 
-export async function addChatMessage(callId, { from, text, gifUrl }) {
+export async function addChatMessage(callId, { from, text, gifUrl, prompt }) {
   const clean = text ? String(text).slice(0, MAX_MESSAGE_LENGTH).trim() : "";
-  if (!clean && !gifUrl) return null;
+  if (!clean && !gifUrl && !prompt) return null;
   const doc = await getOrCreate(callId);
   const message = {
     id: makeId("msg"),
     from,
-    type: gifUrl ? "gif" : "text",
+    type: gifUrl ? "gif" : prompt ? "prompt" : "text",
     text: clean || undefined,
     gifUrl: gifUrl || undefined,
+    prompt: prompt || undefined,
     at: Date.now(),
     status: "sent",
     reactions: [],

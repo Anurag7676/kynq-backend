@@ -10,6 +10,7 @@ import * as matchmaker from "./matchmaker.js";
 import { getCall, endCall, createGameSession, getGameSession, updateGameSession } from "./calls-store.js";
 import { GAME_TYPES, TURN_BASED_GAMES, createInitialState, applyMove, redactState } from "./games.js";
 import { addChatMessage, markMessageStatus, setReaction } from "./chat-store.js";
+import { getRandomPrompt } from "./prompts.js";
 import { submitReport } from "./reports.js";
 import { blockUser } from "./blocks.js";
 
@@ -105,6 +106,18 @@ export function initSignaling(server) {
       if (!callId || callId !== socket.data.currentCallId) return ack?.({ ok: false });
       const message = await addChatMessage(callId, { from: scopedId, text, gifUrl });
       if (!message) return ack?.({ ok: false, reason: "empty message" });
+      io.to(callId).emit("chat:message", message);
+      ack?.({ ok: true, id: message.id });
+    });
+
+    // Drops a conversation-starter prompt into the shared chat thread —
+    // same message stream as text/gif, just a different `type` so the
+    // client can render it distinctly. Either participant can trigger one;
+    // there's no turn/ownership concept, it's a shared conversation aid.
+    socket.on("prompt:send", async ({ callId, category } = {}, ack) => {
+      if (!callId || callId !== socket.data.currentCallId) return ack?.({ ok: false });
+      const prompt = getRandomPrompt(category);
+      const message = await addChatMessage(callId, { from: scopedId, prompt });
       io.to(callId).emit("chat:message", message);
       ack?.({ ok: true, id: message.id });
     });

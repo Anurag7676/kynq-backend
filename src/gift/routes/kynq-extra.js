@@ -5,6 +5,7 @@ import { getExtraProfile, setExtraProfile, INTEREST_TOPICS, LOCATION_SCOPES, IND
 import { mintTurnCredentials, turnConfigured } from "../../kynqExtra/turnCredentials.js";
 import { listOpenReports, reviewReport, setRestricted } from "../../kynqExtra/reports.js";
 import { searchGifs, trendingGifs, giphyConfigured } from "../../kynqExtra/giphy.js";
+import { PROMPT_CATEGORIES } from "../../kynqExtra/prompts.js";
 import { auth } from "../../middleware/authMiddleware.js";
 
 const router = express.Router();
@@ -25,6 +26,11 @@ router.get("/topics", wrap(async (req, res) => {
 // pickers render, server-side source of truth (see profile.js).
 router.get("/cities", wrap(async (req, res) => {
   ok(res, { cities: INDIAN_CITIES });
+}));
+
+// GET /api/kynq-extra/prompt-categories — for the Prompts picker.
+router.get("/prompt-categories", wrap(async (req, res) => {
+  ok(res, { categories: PROMPT_CATEGORIES });
 }));
 
 router.get("/profile", wrap(async (req, res) => {
