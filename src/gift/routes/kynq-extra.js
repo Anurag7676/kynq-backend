@@ -7,6 +7,7 @@ import { listOpenReports, reviewReport, setRestricted } from "../../kynqExtra/re
 import { searchGifs, trendingGifs, giphyConfigured } from "../../kynqExtra/giphy.js";
 import { PROMPT_CATEGORIES } from "../../kynqExtra/prompts.js";
 import { listCallsForUser } from "../../kynqExtra/calls-store.js";
+import { getBalance, getHistory, EARN_RULES } from "../../kynqExtra/wallet.js";
 import {
   proposeChallenge, respondToChallenge, listMyChallenges, getChallenge,
   getQuestionOptions, askQuestion, answerQuestion, answerDayGame, shareMoment,
@@ -79,6 +80,18 @@ router.get("/gifs", wrap(async (req, res) => {
   } catch (err) {
     badRequest(res, err.message);
   }
+}));
+
+// GET /api/kynq-extra/wallet — balance + recent transaction history.
+// Never client-writable — coins are only ever credited server-side, from
+// real events (first chat, daily activity, a game win, a challenge
+// streak), never from a client-supplied "I earned coins" call. See
+// wallet.js for why spending isn't built yet.
+router.get("/wallet", wrap(async (req, res) => {
+  const { userId } = await getScopedId(req, res);
+  if (!userId) return unauthorized(res, "sign in to use kynq extra");
+  const [balance, history] = await Promise.all([getBalance(userId), getHistory(userId)]);
+  ok(res, { balance, history, earnRules: EARN_RULES });
 }));
 
 // GET /api/kynq-extra/calls — past 1-to-1 calls, most recent first.

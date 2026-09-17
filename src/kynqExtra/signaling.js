@@ -13,6 +13,7 @@ import { addChatMessage, markMessageStatus, setReaction } from "./chat-store.js"
 import { getRandomPrompt } from "./prompts.js";
 import { submitReport } from "./reports.js";
 import { blockUser } from "./blocks.js";
+import { credit, todayKey } from "./wallet.js";
 
 // Emits a game event to every socket in the call's room, but with the
 // state redacted per-viewer (a quiz's correct answer, Guess the Word's
@@ -28,22 +29,29 @@ function emitGameEvent(io, callId, gameType, eventName, basePayload) {
   }
 }
 
+// Clears currentCallId/peerScopedId on every socket in the room — used
+// whenever a call ends, so a still-connected peer isn't left thinking
+// they're "already in a call" forever (there's no client round-trip that
+// would tell the server to clear the peer's own state otherwise).
+function clearCallState(io, callId) {
+  const roomSockets = io.sockets.adapter.rooms.get(callId);
+  if (!roomSockets) return;
+  for (const socketId of roomSockets) {
+    const sock = io.sockets.sockets.get(socketId);
+    if (!sock) continue;
+    sock.leave(callId);
+    sock.data.currentCallId = null;
+    sock.data.peerScopedId = null;
+  }
+}
+
 async function leaveActiveCall(io, socket, reason) {
   const callId = socket.data.currentCallId;
   if (!callId) return;
-  const peerScopedId = socket.data.peerScopedId;
 
   await endCall(callId, reason).catch((err) => console.error("[kynqExtra] endCall failed:", err));
   socket.to(callId).emit("call:ended", { reason });
-
-  socket.leave(callId);
-  socket.data.currentCallId = null;
-  socket.data.peerScopedId = null;
-
-  // The peer's own socket.data still points at the now-ended call —
-  // clear it via a broadcast the peer's handler listens for below.
-  io.to(callId).emit("call:_clear_state", {});
-  void peerScopedId;
+  clearCallState(io, callId);
 }
 
 // ─── Reconnection grace period ──────────────────────────────
@@ -60,7 +68,7 @@ function scheduleGraceEnd(io, scopedId, callId, peerScopedId) {
     pendingDisconnects.delete(scopedId);
     await endCall(callId, "peer_disconnected").catch((err) => console.error("[kynqExtra] endCall failed:", err));
     io.to(callId).emit("call:ended", { reason: "peer_disconnected" });
-    io.to(callId).emit("call:_clear_state", {});
+    clearCallState(io, callId);
   }, RECONNECT_GRACE_MS);
   pendingDisconnects.set(scopedId, { callId, peerScopedId, timer });
 }
@@ -143,6 +151,9 @@ export function initSignaling(server) {
           locationScope: payload.locationScope,
           location: payload.location,
         });
+        // "Daily activity" coins — idempotency key includes today's date,
+        // so this pays out once per calendar day, not once per queue join.
+        credit(scopedId, "daily_activity", { refId: todayKey() }).catch((err) => console.error("[kynqExtra] wallet credit failed:", err));
         ack?.({ ok: true });
       } catch (err) {
         ack?.({ ok: false, reason: err.message });
@@ -248,6 +259,15 @@ export function initSignaling(server) {
           status: updated.status,
           winner: result.winner ?? null,
         });
+
+        if (result.winner) {
+          // Turn-based games (tic-tac-toe) have exactly one win ever per
+          // gameId. Round-based games (RPS, quiz, guess-the-word) can be
+          // won repeatedly within the same gameId — round differentiates
+          // those so each round's win is credited once, not just the first.
+          const round = updated.state?.round ?? updated.state?.lastGuess?.guess ?? "final";
+          credit(result.winner, "game_win", { refId: `${gameId}:${round}` }).catch((err) => console.error("[kynqExtra] wallet credit failed:", err));
+        }
         ack?.({ ok: true });
       } catch (err) {
         ack?.({ ok: false, reason: err.message });
@@ -261,15 +281,6 @@ export function initSignaling(server) {
 
     socket.on("call:end", async () => {
       await leaveActiveCall(io, socket, "ended_by_user");
-    });
-
-    // Server clears its own state once it's re-broadcast the clear signal
-    // (see leaveActiveCall) — this listener fires on BOTH participants'
-    // sockets, including the one that triggered it, which is fine since
-    // leaveActiveCall already cleared the triggering socket directly.
-    socket.on("call:_clear_state", () => {
-      socket.data.currentCallId = null;
-      socket.data.peerScopedId = null;
     });
 
     socket.on("report:submit", async ({ callId, reason, note } = {}, ack) => {

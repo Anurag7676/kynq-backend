@@ -25,6 +25,7 @@
 import { collection, makeId } from "../gift/store.js";
 import { pickQuestionOptions } from "./challenge-questions.js";
 import { randomAsyncGamePrompt } from "./challenge-game.js";
+import { credit } from "./wallet.js";
 
 const challenges = collection("challenges");
 const QUESTIONS_PER_DAY = 5;
@@ -195,6 +196,16 @@ async function persistDayUpdate(challenge, day) {
     const prevDay = challenge.days[day.day - 1];
     const withinGrace = day.day === 1 || (prevDay?.completedAt && now - prevDay.completedAt <= STREAK_GRACE_MS);
     next.streak = withinGrace ? (challenge.streak || 0) + 1 : 1;
+
+    // Streak bonus coins for both participants — only from day 2 onward
+    // (day 1 completing a challenge you just started isn't really a
+    // "streak" yet). refId scopes it to this exact challenge+day, so it's
+    // a one-time credit per day per challenge, not per participant call.
+    if (next.streak > 1) {
+      const refId = `${challenge.id}:day${day.day}`;
+      credit(challenge.participantA, "challenge_streak", { refId }).catch((err) => console.error("[kynqExtra] wallet credit failed:", err));
+      credit(challenge.participantB, "challenge_streak", { refId }).catch((err) => console.error("[kynqExtra] wallet credit failed:", err));
+    }
 
     if (day.day >= TOTAL_DAYS) {
       next.status = "completed";
