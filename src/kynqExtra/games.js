@@ -32,6 +32,10 @@ const WOULD_YOU_RATHER_PROMPTS = [
 function randomWouldYouRather() {
   return WOULD_YOU_RATHER_PROMPTS[Math.floor(Math.random() * WOULD_YOU_RATHER_PROMPTS.length)];
 }
+// Exported for challenge-game.js — the 7-Day Challenge's daily "game" step
+// reuses this same prompt content (it's naturally async: pick an answer,
+// no live-connection requirement), rather than duplicating the list.
+export { randomWouldYouRather };
 
 const THIS_OR_THAT_PROMPTS = [
   { a: "coffee", b: "tea" }, { a: "beach", b: "mountains" },
@@ -40,7 +44,7 @@ const THIS_OR_THAT_PROMPTS = [
   { a: "city life", b: "countryside" }, { a: "dogs", b: "cats" },
   { a: "winter", b: "summer" }, { a: "planned", b: "spontaneous" },
 ];
-function randomThisOrThat() {
+export function randomThisOrThat() {
   return THIS_OR_THAT_PROMPTS[Math.floor(Math.random() * THIS_OR_THAT_PROMPTS.length)];
 }
 

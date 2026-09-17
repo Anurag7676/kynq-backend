@@ -6,6 +6,10 @@ import { mintTurnCredentials, turnConfigured } from "../../kynqExtra/turnCredent
 import { listOpenReports, reviewReport, setRestricted } from "../../kynqExtra/reports.js";
 import { searchGifs, trendingGifs, giphyConfigured } from "../../kynqExtra/giphy.js";
 import { PROMPT_CATEGORIES } from "../../kynqExtra/prompts.js";
+import {
+  proposeChallenge, respondToChallenge, listMyChallenges, getChallenge,
+  getQuestionOptions, askQuestion, answerQuestion, answerDayGame, shareMoment,
+} from "../../kynqExtra/challenges.js";
 import { auth } from "../../middleware/authMiddleware.js";
 
 const router = express.Router();
@@ -73,6 +77,102 @@ router.get("/turn-credentials", wrap(async (req, res) => {
   if (!userId) return unauthorized(res, "sign in to use kynq extra");
   if (!turnConfigured) return ok(res, { configured: false });
   ok(res, { configured: true, ...mintTurnCredentials(userId) });
+}));
+
+// ─── 7-Day Challenge — plain REST, deliberately NOT socket/call-bound
+// (see challenges.js header). requireChallengeUser resolves scopedId once
+// per route instead of repeating the getScopedId dance in every handler. ───
+async function requireChallengeUser(req, res) {
+  const { userId } = await getScopedId(req, res);
+  if (!userId) { unauthorized(res, "sign in to use kynq extra"); return null; }
+  return userId;
+}
+
+router.get("/challenges", wrap(async (req, res) => {
+  const scopedId = await requireChallengeUser(req, res);
+  if (!scopedId) return;
+  ok(res, { challenges: await listMyChallenges(scopedId) });
+}));
+
+router.post("/challenges", wrap(async (req, res) => {
+  const scopedId = await requireChallengeUser(req, res);
+  if (!scopedId) return;
+  const { peerScopedId } = req.body || {};
+  if (!peerScopedId) return badRequest(res, "peerScopedId required");
+  try {
+    created(res, { challenge: await proposeChallenge(scopedId, peerScopedId) });
+  } catch (err) {
+    badRequest(res, err.message);
+  }
+}));
+
+router.get("/challenges/:id", wrap(async (req, res) => {
+  const scopedId = await requireChallengeUser(req, res);
+  if (!scopedId) return;
+  const challenge = await getChallenge(req.params.id, scopedId);
+  if (!challenge) return badRequest(res, "challenge not found");
+  ok(res, { challenge });
+}));
+
+router.post("/challenges/:id/respond", wrap(async (req, res) => {
+  const scopedId = await requireChallengeUser(req, res);
+  if (!scopedId) return;
+  try {
+    const challenge = await respondToChallenge(req.params.id, scopedId, !!req.body?.accept);
+    ok(res, { challenge });
+  } catch (err) {
+    badRequest(res, err.message);
+  }
+}));
+
+router.get("/challenges/:id/question-options", wrap(async (req, res) => {
+  const scopedId = await requireChallengeUser(req, res);
+  if (!scopedId) return;
+  try {
+    ok(res, { options: await getQuestionOptions(req.params.id, scopedId) });
+  } catch (err) {
+    badRequest(res, err.message);
+  }
+}));
+
+router.post("/challenges/:id/ask", wrap(async (req, res) => {
+  const scopedId = await requireChallengeUser(req, res);
+  if (!scopedId) return;
+  try {
+    ok(res, { challenge: await askQuestion(req.params.id, scopedId, req.body?.question) });
+  } catch (err) {
+    badRequest(res, err.message);
+  }
+}));
+
+router.post("/challenges/:id/answer", wrap(async (req, res) => {
+  const scopedId = await requireChallengeUser(req, res);
+  if (!scopedId) return;
+  try {
+    ok(res, { challenge: await answerQuestion(req.params.id, scopedId, req.body?.answer) });
+  } catch (err) {
+    badRequest(res, err.message);
+  }
+}));
+
+router.post("/challenges/:id/game", wrap(async (req, res) => {
+  const scopedId = await requireChallengeUser(req, res);
+  if (!scopedId) return;
+  try {
+    ok(res, { challenge: await answerDayGame(req.params.id, scopedId, req.body?.choice) });
+  } catch (err) {
+    badRequest(res, err.message);
+  }
+}));
+
+router.post("/challenges/:id/moment", wrap(async (req, res) => {
+  const scopedId = await requireChallengeUser(req, res);
+  if (!scopedId) return;
+  try {
+    ok(res, { challenge: await shareMoment(req.params.id, scopedId, req.body || {}) });
+  } catch (err) {
+    badRequest(res, err.message);
+  }
 }));
 
 // ─── Admin moderation — reuses the existing JWT-bearer admin auth
