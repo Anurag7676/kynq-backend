@@ -46,6 +46,7 @@ function emptyDay(dayNumber, firstAsker) {
 
 function isDayComplete(day) {
   return day.questions.length >= QUESTIONS_PER_DAY
+    && day.questions.every((q) => q.answer != null)
     && Object.keys(day.gameAnswers).length >= 2
     && !!day.moment;
 }
