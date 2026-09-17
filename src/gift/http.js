@@ -15,6 +15,8 @@ export const badRequest = (res, message, details) =>
   send(res, 400, { error: "bad_request", message, ...(details ? { details } : {}) });
 export const unauthorized = (res, message = "unauthorized") =>
   send(res, 401, { error: "unauthorized", message });
+export const forbidden = (res, message = "forbidden") =>
+  send(res, 403, { error: "forbidden", message });
 export const notFound = (res, message = "not found") =>
   send(res, 404, { error: "not_found", message });
 export const conflict = (res, message) =>
