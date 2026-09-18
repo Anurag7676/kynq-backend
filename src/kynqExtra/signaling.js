@@ -275,8 +275,11 @@ export function initSignaling(server) {
     });
 
     // ─── Call lifecycle ───
-    socket.on("call:next", async () => {
+    // Acks only once the call is actually left — a client that re-queues
+    // before this completes would be rejected with "already in a call".
+    socket.on("call:next", async (payload, ack) => {
       await leaveActiveCall(io, socket, "next");
+      ack?.({ ok: true });
     });
 
     socket.on("call:end", async () => {
