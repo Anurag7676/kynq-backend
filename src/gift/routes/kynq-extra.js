@@ -8,6 +8,8 @@ import { searchGifs, trendingGifs, giphyConfigured } from "../../kynqExtra/giphy
 import { PROMPT_CATEGORIES } from "../../kynqExtra/prompts.js";
 import { listCallsForUser } from "../../kynqExtra/calls-store.js";
 import { getBalance, getHistory, EARN_RULES } from "../../kynqExtra/wallet.js";
+import { listPacks, createCoinOrder, getCoinOrder, listCoinOrdersForUser, reconcileCoinOrder } from "../../kynqExtra/coins.js";
+import { getCurrentUser } from "../session.js";
 import {
   proposeChallenge, respondToChallenge, listMyChallenges, getChallenge,
   getQuestionOptions, askQuestion, answerQuestion, answerDayGame, shareMoment,
@@ -204,6 +206,44 @@ router.post("/challenges/:id/moment", wrap(async (req, res) => {
   } catch (err) {
     badRequest(res, err.message);
   }
+}));
+
+// ─── Coins — packs bought through Cashfree (see kynqExtra/coins.js). The
+// server owns prices, order state and the wallet credit; the client only
+// picks a pack and completes Cashfree's hosted checkout. ───
+router.get("/coins/packs", wrap(async (req, res) => {
+  ok(res, { packs: listPacks() });
+}));
+
+router.post("/coins/orders", wrap(async (req, res) => {
+  const user = await getCurrentUser(req);
+  if (!user) return unauthorized(res, "sign in to buy coins");
+  const packId = String(req.body?.packId || "");
+  const phone = String(req.body?.phone || "").replace(/\s+/g, "");
+  if (!/^\+?\d{10,15}$/.test(phone)) return badRequest(res, "a phone number is required for the payment receipt");
+  try {
+    const result = await createCoinOrder({ user, packId, phone });
+    created(res, result);
+  } catch (err) {
+    if (err.code === "BAD_PACK") return badRequest(res, "unknown pack");
+    console.error("[coins] order creation failed:", err.message, err.cause?.cashfree);
+    badRequest(res, err.message);
+  }
+}));
+
+router.get("/coins/orders", wrap(async (req, res) => {
+  const { userId } = await getScopedId(req, res);
+  if (!userId) return unauthorized(res, "sign in to use kynq extra");
+  ok(res, { orders: await listCoinOrdersForUser(userId, Number(req.query.limit) || 20) });
+}));
+
+router.get("/coins/orders/:id", wrap(async (req, res) => {
+  const { userId } = await getScopedId(req, res);
+  if (!userId) return unauthorized(res, "sign in to use kynq extra");
+  let order = await getCoinOrder(req.params.id);
+  if (!order || order.userId !== userId) return badRequest(res, "order not found");
+  order = await reconcileCoinOrder(order);
+  ok(res, { order });
 }));
 
 // ─── Admin moderation — reuses the existing JWT-bearer admin auth

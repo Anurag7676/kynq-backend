@@ -4,6 +4,7 @@ import { collection } from "../store.js";
 import { ok, badRequest, wrap } from "../http.js";
 import { verifyCashfreeWebhookSignature } from "../cashfree.js";
 import { sendOrderConfirmationEmail } from "../order-email.js";
+import { handleCoinWebhook } from "../../kynqExtra/coins.js";
 
 const router = express.Router();
 const carts = collection("carts");
@@ -26,6 +27,12 @@ router.post("/", wrap(async (req, res) => {
   const event = JSON.parse(rawBody);
   const orderId = event?.data?.order?.order_id;
   if (!orderId) return ok(res, { received: true });
+
+  // Coin purchases share this webhook URL; their ids carry their own prefix.
+  if (orderId.startsWith("coin_")) {
+    await handleCoinWebhook(event);
+    return ok(res, { received: true });
+  }
 
   const order = await getOrder(orderId);
   if (!order) {

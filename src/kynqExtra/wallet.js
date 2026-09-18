@@ -1,23 +1,22 @@
-// Kynq Extra's coin wallet — an immutable, append-only transaction ledger,
-// NOT a `user.coins += amount` counter. Every credit is idempotent (keyed
-// by a deterministic key, not a random id), so a retried request or a
-// duplicate event trigger can never double-pay. Balance is cached for fast
-// reads but is always re-derivable from the ledger — reconcile() proves
-// that by recomputing it from scratch and repairing the cache if they've
-// ever drifted, which is the entire point of keeping a ledger instead of
-// just a counter: the counter can be wrong, the ledger can't lie about
-// what happened.
+// Coin wallet — an append-only ledger plus a cached balance. Never a bare
+// `user.coins += n`.
 //
-// Spending is deliberately NOT built yet — the original brief's spend
-// targets (regional matching filters, extra game packs, premium memes,
-// profile customization) don't exist as real features in this codebase.
-// Building a "redeem" UI against nothing would be the same mistake as
-// faking the Memes panel before GIFs actually worked — this wallet is
-// real and earns real coins, it just has nothing to spend them on yet.
-import { collection, makeId } from "../gift/store.js";
+// Every movement is a `wallet_transactions` document keyed by a
+// deterministic idempotency key (`${type}:${userId}:${refId}`) under a
+// UNIQUE index, so a duplicate webhook, a retried request or a reconcile
+// pass can never apply the same credit or debit twice. Balances live in
+// `wallet_balances` and move only via atomic $inc; debits are guarded by
+// `balance >= amount` in the same update, so concurrent sends can't
+// overspend. reconcile() recomputes a balance strictly from the ledger.
+//
+// Document shapes are unchanged from the original store-backed version
+// ({ _key, ...fields }), so existing data keeps working.
+import mongoose from "mongoose";
+import { makeId } from "../gift/store.js";
 
-const transactions = collection("wallet_transactions"); // keyed by idempotency key
-const balances = collection("wallet_balances"); // cache: {userId, balance, updatedAt}
+const TX = "wallet_transactions";
+const BAL = "wallet_balances";
+const coll = (name) => mongoose.connection.collection(name);
 
 export const EARN_RULES = {
   first_chat: { amount: 20, label: "completed your first chat" },
@@ -26,64 +25,135 @@ export const EARN_RULES = {
   challenge_streak: { amount: 15, label: "maintained your streak" },
 };
 
-// idempotencyKey defaults to `${type}:${userId}:${refId}` — pass refId to
-// scope a repeatable event (a specific game, a specific challenge day); a
-// type with no refId (like first_chat) naturally resolves to the same key
-// every time, so it can only ever be credited once, ever, for that user.
-export async function credit(userId, type, { refId, note } = {}) {
+export class InsufficientBalanceError extends Error {
+  constructor(balance, amount) {
+    super("insufficient balance");
+    this.code = "INSUFFICIENT_BALANCE";
+    this.balance = balance;
+    this.amount = amount;
+  }
+}
+
+let indexesReady = null;
+export function ensureWalletIndexes() {
+  if (!indexesReady) {
+    indexesReady = Promise.all([
+      coll(TX).createIndex({ _key: 1 }, { unique: true }),
+      coll(TX).createIndex({ userId: 1, createdAt: -1 }),
+      coll(BAL).createIndex({ _key: 1 }, { unique: true }),
+    ]).catch((err) => { indexesReady = null; throw err; });
+  }
+  return indexesReady;
+}
+
+function strip(doc) {
+  if (!doc) return null;
+  const { _id, _key, ...rest } = doc;
+  return rest;
+}
+
+function keyFor(type, userId, refId) {
+  return `${type}:${userId}:${refId ?? ""}`;
+}
+
+async function bumpBalance(userId, delta, filter = {}) {
+  const r = await coll(BAL).findOneAndUpdate(
+    { _key: userId, ...filter },
+    { $inc: { balance: delta }, $set: { userId, updatedAt: Date.now() } },
+    { upsert: Object.keys(filter).length === 0, returnDocument: "after" }
+  );
+  return r && ("value" in r ? r.value : r);
+}
+
+/**
+ * Credit coins. Idempotent per (type, userId, refId). `amount` defaults to
+ * the earn rule for `type`; purchases pass it explicitly.
+ */
+export async function credit(userId, type, { refId, note, amount } = {}) {
+  await ensureWalletIndexes();
   const rule = EARN_RULES[type];
-  if (!rule) throw new Error(`unknown earn type: ${type}`);
-  const key = `${type}:${userId}:${refId ?? ""}`;
-
-  const existing = await transactions.get(key);
-  if (existing) return existing; // idempotent no-op — already credited, not an error
-
-  const current = await balances.get(userId);
-  const prevBalance = current?.balance ?? 0;
-  const newBalance = prevBalance + rule.amount;
+  const value = amount ?? rule?.amount;
+  if (!value || value <= 0) throw new Error(`no amount for credit type: ${type}`);
+  const key = keyFor(type, userId, refId);
 
   const tx = {
-    id: makeId("txn"),
-    userId,
-    type,
-    amount: rule.amount,
-    reason: note ?? rule.label,
-    refId: refId ?? null,
-    balanceAfter: newBalance,
-    createdAt: Date.now(),
+    _key: key, id: makeId("txn"), userId, type, amount: value,
+    reason: note ?? rule?.label ?? type, refId: refId ?? null, createdAt: Date.now(),
   };
-  await transactions.set(key, tx);
-  await balances.set(userId, { userId, balance: newBalance, updatedAt: Date.now() });
-  return tx;
+  try {
+    await coll(TX).insertOne(tx);
+  } catch (err) {
+    if (err?.code === 11000) return strip(await coll(TX).findOne({ _key: key })); // already applied
+    throw err;
+  }
+  const bal = await bumpBalance(userId, value);
+  await coll(TX).updateOne({ _key: key }, { $set: { balanceAfter: bal?.balance ?? null } });
+  return { ...strip(tx), balanceAfter: bal?.balance ?? null };
+}
+
+/**
+ * Debit coins atomically. `refId` is REQUIRED — it is the idempotency key,
+ * so a retried request debits once. Throws InsufficientBalanceError unless
+ * `allowNegative` (used only to reverse a refunded purchase).
+ */
+export async function debit(userId, type, amount, { refId, note, allowNegative = false } = {}) {
+  await ensureWalletIndexes();
+  if (!refId) throw new Error("debit requires a refId");
+  if (!amount || amount <= 0) throw new Error("debit amount must be positive");
+  const key = keyFor(type, userId, refId);
+
+  const existing = await coll(TX).findOne({ _key: key });
+  if (existing) return strip(existing); // duplicate request — already debited
+
+  const guard = allowNegative ? {} : { balance: { $gte: amount } };
+  if (!allowNegative) {
+    // Make sure a balance doc exists so the guarded update can match.
+    await coll(BAL).updateOne({ _key: userId }, { $setOnInsert: { userId, balance: 0, updatedAt: Date.now() } }, { upsert: true });
+  }
+  const bal = await bumpBalance(userId, -amount, guard);
+  if (!bal) {
+    const current = await coll(BAL).findOne({ _key: userId });
+    throw new InsufficientBalanceError(current?.balance ?? 0, amount);
+  }
+
+  const tx = {
+    _key: key, id: makeId("txn"), userId, type, amount: -amount,
+    reason: note ?? type, refId, balanceAfter: bal.balance, createdAt: Date.now(),
+  };
+  try {
+    await coll(TX).insertOne(tx);
+  } catch (err) {
+    if (err?.code === 11000) {
+      // A concurrent identical request won the insert; give this decrement back.
+      await bumpBalance(userId, amount);
+      return strip(await coll(TX).findOne({ _key: key }));
+    }
+    throw err;
+  }
+  return strip(tx);
 }
 
 export async function getBalance(userId) {
-  const bal = await balances.get(userId);
+  const bal = await coll(BAL).findOne({ _key: userId });
   return bal?.balance ?? 0;
 }
 
 export async function getHistory(userId, limit = 50) {
-  const all = await transactions.find((t) => t.userId === userId);
-  return all.sort((a, b) => b.createdAt - a.createdAt).slice(0, limit);
+  const docs = await coll(TX).find({ userId }).sort({ createdAt: -1 }).limit(limit).toArray();
+  return docs.map(strip);
 }
 
-// Recomputes a user's balance strictly from the ledger sum and repairs the
-// cache if it's drifted. Not wired to a schedule/cron here (no job runner
-// exists in this codebase) — exposed for an admin endpoint or manual
-// invocation; the cache is written transactionally alongside every credit()
-// anyway, so drift should only ever happen from a bug, not normal operation.
+/** Recompute strictly from the ledger and repair the cache if it drifted. */
 export async function reconcile(userId) {
-  const all = await transactions.find((t) => t.userId === userId);
-  const total = all.reduce((sum, t) => sum + t.amount, 0);
-  const cached = await balances.get(userId);
+  const [agg] = await coll(TX).aggregate([{ $match: { userId } }, { $group: { _id: null, total: { $sum: "$amount" } } }]).toArray();
+  const total = agg?.total ?? 0;
+  const cached = await coll(BAL).findOne({ _key: userId });
   if (!cached || cached.balance !== total) {
-    await balances.set(userId, { userId, balance: total, updatedAt: Date.now() });
+    await coll(BAL).updateOne({ _key: userId }, { $set: { userId, balance: total, updatedAt: Date.now() } }, { upsert: true });
   }
   return total;
 }
 
-// Calendar-day key in UTC — used by the daily_activity idempotency key so
-// it credits once per day, not once ever.
 export function todayKey() {
   return new Date().toISOString().slice(0, 10);
 }
