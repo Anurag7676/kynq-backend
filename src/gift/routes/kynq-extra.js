@@ -7,6 +7,8 @@ import { listOpenReports, reviewReport, setRestricted } from "../../kynqExtra/re
 import { searchGifs, trendingGifs, giphyConfigured } from "../../kynqExtra/giphy.js";
 import { PROMPT_CATEGORIES, samplePrompts } from "../../kynqExtra/prompts.js";
 import { getPulse } from "../../kynqExtra/pulse.js";
+import * as friends from "../../kynqExtra/friends.js";
+import { emitToUser } from "../../kynqExtra/signaling.js";
 import { listCallsForUser } from "../../kynqExtra/calls-store.js";
 import { getBalance, getHistory, EARN_RULES } from "../../kynqExtra/wallet.js";
 import { listPacks, createCoinOrder, getCoinOrder, listCoinOrdersForUser, reconcileCoinOrder } from "../../kynqExtra/coins.js";
@@ -317,6 +319,96 @@ router.post("/admin/users/:userId/restrict", auth, requireAdmin, wrap(async (req
   const restricted = req.body?.restricted !== false;
   await setRestricted(req.params.userId, restricted);
   ok(res, { userId: req.params.userId, restricted });
+}));
+
+// ─── Friends + direct messages ───
+// Mutual-only friendships, requestable only after a real match; DMs only
+// between friends. See kynqExtra/friends.js for the rules.
+const friendErr = (res, err) => {
+  if (err instanceof friends.FriendError) return res.status(err.status).json({ success: false, message: err.message });
+  throw err;
+};
+
+router.get("/friends", wrap(async (req, res) => {
+  const { userId } = await getScopedId(req, res);
+  if (!userId) return unauthorized(res, "sign in to use kynq extra");
+  const [list, requests] = await Promise.all([friends.listFriends(userId), friends.listRequests(userId)]);
+  const ids = [...new Set([...list.map((f) => f.userId), ...requests.incoming.map((r) => r.userId), ...requests.outgoing.map((r) => r.userId)])];
+  const names = {};
+  for (const id of ids) names[id] = (await getPublicName(id))?.name ?? "someone"; // eslint-disable-line no-await-in-loop
+  ok(res, { friends: list, requests, names });
+}));
+
+router.get("/friends/summary", wrap(async (req, res) => {
+  const { userId } = await getScopedId(req, res);
+  if (!userId) return unauthorized(res, "sign in to use kynq extra");
+  ok(res, await friends.summary(userId));
+}));
+
+router.get("/friends/status", wrap(async (req, res) => {
+  const { userId } = await getScopedId(req, res);
+  if (!userId) return unauthorized(res, "sign in to use kynq extra");
+  const ids = String(req.query.ids ?? "").split(",").map((s) => s.trim()).filter(Boolean).slice(0, 100);
+  ok(res, { status: await friends.statusMap(userId, ids) });
+}));
+
+router.post("/friends/requests", wrap(async (req, res) => {
+  const { userId } = await getScopedId(req, res);
+  if (!userId) return unauthorized(res, "sign in to use kynq extra");
+  const { userId: to, callId } = req.body ?? {};
+  try {
+    const r = await friends.sendRequest(userId, String(to ?? ""), { callId });
+    const me = (await getPublicName(userId))?.name ?? "someone";
+    if (r.accepted) { emitToUser(to, "friend:accepted", { userId, name: me }); emitToUser(userId, "friend:accepted", { userId: to }); }
+    else if (r.request) emitToUser(to, "friend:request", { userId, name: me });
+    ok(res, { status: r.status });
+  } catch (err) { friendErr(res, err); }
+}));
+
+router.post("/friends/requests/:userId/respond", wrap(async (req, res) => {
+  const { userId } = await getScopedId(req, res);
+  if (!userId) return unauthorized(res, "sign in to use kynq extra");
+  const other = req.params.userId;
+  const decision = req.body?.decision === "accept" ? "accept" : "decline";
+  try {
+    const r = await friends.respondRequest(userId, other, decision);
+    if (r.accepted) { const me = (await getPublicName(userId))?.name ?? "someone"; emitToUser(other, "friend:accepted", { userId, name: me }); }
+    ok(res, { status: r.status });
+  } catch (err) { friendErr(res, err); }
+}));
+
+router.delete("/friends/:userId", wrap(async (req, res) => {
+  const { userId } = await getScopedId(req, res);
+  if (!userId) return unauthorized(res, "sign in to use kynq extra");
+  ok(res, await friends.unfriend(userId, req.params.userId));
+}));
+
+router.get("/dm/:userId", wrap(async (req, res) => {
+  const { userId } = await getScopedId(req, res);
+  if (!userId) return unauthorized(res, "sign in to use kynq extra");
+  try {
+    const messages = await friends.listDm(userId, req.params.userId, { before: Number(req.query.before) || undefined });
+    ok(res, { messages, name: (await getPublicName(req.params.userId))?.name ?? "someone" });
+  } catch (err) { friendErr(res, err); }
+}));
+
+router.post("/dm/:userId", wrap(async (req, res) => {
+  const { userId } = await getScopedId(req, res);
+  if (!userId) return unauthorized(res, "sign in to use kynq extra");
+  try {
+    const m = await friends.sendDm(userId, req.params.userId, req.body?.text);
+    emitToUser(req.params.userId, "dm:message", m);
+    emitToUser(userId, "dm:message", m);
+    created(res, { message: m });
+  } catch (err) { friendErr(res, err); }
+}));
+
+router.post("/dm/:userId/read", wrap(async (req, res) => {
+  const { userId } = await getScopedId(req, res);
+  if (!userId) return unauthorized(res, "sign in to use kynq extra");
+  const r = await friends.markRead(userId, req.params.userId);
+  if (r.marked) emitToUser(req.params.userId, "dm:read", { by: userId, ids: r.ids, readAt: r.readAt });
+  ok(res, r);
 }));
 
 export default router;

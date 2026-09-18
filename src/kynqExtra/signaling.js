@@ -16,6 +16,17 @@ import { blockUser } from "./blocks.js";
 import { credit, todayKey } from "./wallet.js";
 import { sendGift as sendGiftToPeer, GiftError } from "./gifts.js";
 import { attachPulse, recordGift, recordGameWin } from "./pulse.js";
+import { dropOnBlock } from "./friends.js";
+
+// scopedId -> Set<socketId>, so REST routes (friend requests, DMs) can push
+// realtime events to a user wherever they are in the app.
+const userSockets = new Map();
+let ioRef = null;
+export function emitToUser(scopedId, event, payload) {
+  const set = userSockets.get(scopedId);
+  if (!ioRef || !set) return;
+  for (const sid of set) ioRef.to(sid).emit(event, payload);
+}
 
 // Emits a game event to every socket in the call's room, but with the
 // state redacted per-viewer (a quiz's correct answer, Guess the Word's
@@ -121,6 +132,7 @@ export function initSignaling(server) {
     cors: { origin: ALLOWED_ORIGINS, credentials: true },
   });
   attachPulse(io);
+  ioRef = io;
 
   io.use(async (socket, next) => {
     try {
@@ -138,6 +150,8 @@ export function initSignaling(server) {
 
   io.on("connection", (socket) => {
     const { scopedId } = socket.data;
+    if (!userSockets.has(scopedId)) userSockets.set(scopedId, new Set());
+    userSockets.get(scopedId).add(socket.id);
     tryResumeCall(io, socket);
 
     socket.on("queue:join", async (payload = {}, ack) => {
@@ -325,6 +339,7 @@ export function initSignaling(server) {
     socket.on("block:user", async ({ blockedScopedId } = {}, ack) => {
       try {
         await blockUser(scopedId, blockedScopedId);
+        await dropOnBlock(scopedId, blockedScopedId).catch(() => {});
         ack?.({ ok: true });
       } catch (err) {
         ack?.({ ok: false, reason: err.message });
@@ -332,6 +347,8 @@ export function initSignaling(server) {
     });
 
     socket.on("disconnect", () => {
+      const set = userSockets.get(scopedId);
+      if (set) { set.delete(socket.id); if (!set.size) userSockets.delete(scopedId); }
       matchmaker.leaveQueue(scopedId);
       const callId = socket.data.currentCallId;
       const peerScopedId = socket.data.peerScopedId;
