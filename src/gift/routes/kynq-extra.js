@@ -10,6 +10,7 @@ import { listCallsForUser } from "../../kynqExtra/calls-store.js";
 import { getBalance, getHistory, EARN_RULES } from "../../kynqExtra/wallet.js";
 import { listPacks, createCoinOrder, getCoinOrder, listCoinOrdersForUser, reconcileCoinOrder } from "../../kynqExtra/coins.js";
 import { getCurrentUser } from "../session.js";
+import { listCatalog, getInventory, buyGift, listGiftHistory, GiftError, InsufficientBalanceError } from "../../kynqExtra/gifts.js";
 import {
   proposeChallenge, respondToChallenge, listMyChallenges, getChallenge,
   getQuestionOptions, askQuestion, answerQuestion, answerDayGame, shareMoment,
@@ -244,6 +245,41 @@ router.get("/coins/orders/:id", wrap(async (req, res) => {
   if (!order || order.userId !== userId) return badRequest(res, "order not found");
   order = await reconcileCoinOrder(order);
   ok(res, { order });
+}));
+
+// ─── Virtual gifts (see kynqExtra/gifts.js). Sending happens over the
+// socket, where the server knows who you're in a call with. ───
+router.get("/gifts/catalog", wrap(async (req, res) => {
+  const { userId } = await getScopedId(req, res);
+  const inventory = userId ? await getInventory(userId) : {};
+  ok(res, { gifts: listCatalog(), inventory });
+}));
+
+router.post("/gifts/buy", wrap(async (req, res) => {
+  const { userId } = await getScopedId(req, res);
+  if (!userId) return unauthorized(res, "sign in to buy gifts");
+  const { giftId, qty, requestId } = req.body || {};
+  try {
+    const purchase = await buyGift({ userId, giftId: String(giftId || ""), qty: Number(qty ?? 1), requestId });
+    const [inventory, balance] = await Promise.all([getInventory(userId), getBalance(userId)]);
+    created(res, { purchase, inventory, balance });
+  } catch (err) {
+    if (err instanceof InsufficientBalanceError) return res.status(402).json({ error: "insufficient_balance", message: "not enough coins", balance: err.balance, needed: err.amount });
+    if (err instanceof GiftError) return badRequest(res, err.message);
+    throw err;
+  }
+}));
+
+router.get("/gifts/inventory", wrap(async (req, res) => {
+  const { userId } = await getScopedId(req, res);
+  if (!userId) return unauthorized(res, "sign in to use kynq extra");
+  ok(res, { inventory: await getInventory(userId) });
+}));
+
+router.get("/gifts/history", wrap(async (req, res) => {
+  const { userId } = await getScopedId(req, res);
+  if (!userId) return unauthorized(res, "sign in to use kynq extra");
+  ok(res, { sends: await listGiftHistory(userId, Number(req.query.limit) || 50) });
 }));
 
 // ─── Admin moderation — reuses the existing JWT-bearer admin auth

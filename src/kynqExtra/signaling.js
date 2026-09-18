@@ -14,6 +14,7 @@ import { getRandomPrompt } from "./prompts.js";
 import { submitReport } from "./reports.js";
 import { blockUser } from "./blocks.js";
 import { credit, todayKey } from "./wallet.js";
+import { sendGift as sendGiftToPeer, GiftError } from "./gifts.js";
 
 // Emits a game event to every socket in the call's room, but with the
 // state redacted per-viewer (a quiz's correct answer, Guess the Word's
@@ -284,6 +285,24 @@ export function initSignaling(server) {
 
     socket.on("call:end", async () => {
       await leaveActiveCall(io, socket, "ended_by_user");
+    });
+
+    // ─── Gifts — the recipient is whoever the server knows you're in a
+    // call with; the client only names the gift and a requestId. ───
+    socket.on("gift:send", async ({ giftId, requestId } = {}, ack) => {
+      const callId = socket.data.currentCallId;
+      const toUserId = socket.data.peerScopedId;
+      if (!callId || !toUserId) return ack?.({ ok: false, reason: "not in a call" });
+      try {
+        const send = await sendGiftToPeer({ callId, fromUserId: scopedId, toUserId, giftId, requestId });
+        const event = { id: send.id, giftId: send.giftId, name: send.name, from: scopedId, to: toUserId, at: send.createdAt };
+        io.to(callId).emit("gift:received", event);
+        ack?.({ ok: true, send: event, remaining: send.remaining ?? null });
+      } catch (err) {
+        if (err instanceof GiftError) return ack?.({ ok: false, reason: err.message, code: err.code });
+        console.error("[kynqExtra] gift:send failed:", err);
+        ack?.({ ok: false, reason: "couldn't send that gift" });
+      }
     });
 
     socket.on("report:submit", async ({ callId, reason, note } = {}, ack) => {
