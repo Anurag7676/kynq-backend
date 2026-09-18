@@ -75,7 +75,7 @@ export async function createCoinOrder({ user, packId, phone }) {
       amount: pack.priceInr,
       currency: "INR",
       customer: { id: user.id, name: user.name || "kynq member", email: user.email, phone },
-      returnUrl: `${CLIENT_URL}/store?coin_order=${id}`,
+      returnUrl: `${CLIENT_URL}/store/coins?coin_order=${id}`,
     });
     order = withEvent({ ...order, cashfreeOrderId: cf.order_id, cashfreePaymentSessionId: cf.payment_session_id }, "cashfree_order_created");
     await orders.set(id, order);
