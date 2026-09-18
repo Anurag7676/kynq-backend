@@ -99,16 +99,19 @@ if (process.env.NODE_ENV === "development") {
   app.use(morgan("dev"));
 }
 
-// Rate limiters
+// Rate limiters. Production limits are deliberate (OTP abuse, scraping);
+// in development they only get in the way — every page load hits
+// /api/auth/me, so 20/15min trips within minutes of normal testing.
+const isDev = process.env.NODE_ENV === "development";
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 20,
+  max: isDev ? 1000 : 20,
   message: { success: false, message: "Too many attempts, please try again later" },
 });
 
 const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 200,
+  max: isDev ? 10000 : 200,
   message: { success: false, message: "Too many requests, please try again later" },
 });
 
