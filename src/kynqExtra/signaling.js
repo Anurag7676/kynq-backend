@@ -15,6 +15,7 @@ import { submitReport } from "./reports.js";
 import { blockUser } from "./blocks.js";
 import { credit, todayKey } from "./wallet.js";
 import { sendGift as sendGiftToPeer, GiftError } from "./gifts.js";
+import { attachPulse, recordGift, recordGameWin } from "./pulse.js";
 
 // Emits a game event to every socket in the call's room, but with the
 // state redacted per-viewer (a quiz's correct answer, Guess the Word's
@@ -119,6 +120,7 @@ export function initSignaling(server) {
     path: "/kynq-extra/socket.io",
     cors: { origin: ALLOWED_ORIGINS, credentials: true },
   });
+  attachPulse(io);
 
   io.use(async (socket, next) => {
     try {
@@ -145,6 +147,7 @@ export function initSignaling(server) {
         }
         if (socket.data.currentCallId) return ack?.({ ok: false, reason: "already in a call" });
 
+        socket.data.city = typeof payload.location?.city === "string" ? payload.location.city.slice(0, 40) : null;
         matchmaker.joinQueue({
           scopedId,
           socketId: socket.id,
@@ -268,6 +271,7 @@ export function initSignaling(server) {
           // those so each round's win is credited once, not just the first.
           const round = updated.state?.round ?? updated.state?.lastGuess?.guess ?? "final";
           credit(result.winner, "game_win", { refId: `${gameId}:${round}` }).catch((err) => console.error("[kynqExtra] wallet credit failed:", err));
+          recordGameWin(session.gameType, socket.data.city);
         }
         ack?.({ ok: true });
       } catch (err) {
@@ -297,6 +301,7 @@ export function initSignaling(server) {
         const send = await sendGiftToPeer({ callId, fromUserId: scopedId, toUserId, giftId, requestId });
         const event = { id: send.id, giftId: send.giftId, name: send.name, from: scopedId, to: toUserId, at: send.createdAt };
         io.to(callId).emit("gift:received", event);
+        recordGift(send.name, socket.data.city);
         ack?.({ ok: true, send: event, remaining: send.remaining ?? null });
       } catch (err) {
         if (err instanceof GiftError) return ack?.({ ok: false, reason: err.message, code: err.code });

@@ -10,6 +10,7 @@
 // itself does not need to.
 import { isBlockedEitherWay } from "./blocks.js";
 import { createCall, wasRecentlyMatched } from "./calls-store.js";
+import { recordMatch } from "./pulse.js";
 import { credit } from "./wallet.js";
 
 const TICK_MS = 1000;
@@ -117,6 +118,7 @@ export async function runMatchTick(io) {
     if (socketA) { socketA.data.currentCallId = call.id; socketA.data.peerScopedId = match.scopedId; }
     if (socketB) { socketB.data.currentCallId = call.id; socketB.data.peerScopedId = entry.scopedId; }
 
+    recordMatch(entry.location?.city, match.location?.city);
     io.to(entry.socketId).emit("match:found", { callId: call.id, peerScopedId: match.scopedId, initiator: true });
     io.to(match.socketId).emit("match:found", { callId: call.id, peerScopedId: entry.scopedId, initiator: false });
   }

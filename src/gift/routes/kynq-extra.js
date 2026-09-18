@@ -5,7 +5,8 @@ import { getExtraProfile, setExtraProfile, getPublicName, INTEREST_TOPICS, LOCAT
 import { mintTurnCredentials, turnConfigured } from "../../kynqExtra/turnCredentials.js";
 import { listOpenReports, reviewReport, setRestricted } from "../../kynqExtra/reports.js";
 import { searchGifs, trendingGifs, giphyConfigured } from "../../kynqExtra/giphy.js";
-import { PROMPT_CATEGORIES } from "../../kynqExtra/prompts.js";
+import { PROMPT_CATEGORIES, samplePrompts } from "../../kynqExtra/prompts.js";
+import { getPulse } from "../../kynqExtra/pulse.js";
 import { listCallsForUser } from "../../kynqExtra/calls-store.js";
 import { getBalance, getHistory, EARN_RULES } from "../../kynqExtra/wallet.js";
 import { listPacks, createCoinOrder, getCoinOrder, listCoinOrdersForUser, reconcileCoinOrder } from "../../kynqExtra/coins.js";
@@ -38,6 +39,16 @@ router.get("/cities", wrap(async (req, res) => {
 }));
 
 // GET /api/kynq-extra/prompt-categories — for the Prompts picker.
+// Public, anonymised: online count, matches today, recent city-level moments.
+router.get("/pulse", wrap(async (req, res) => {
+  res.set("Cache-Control", "no-store");
+  ok(res, { ...getPulse(), earnRules: EARN_RULES });
+}));
+
+router.get("/prompts/sample", wrap(async (req, res) => {
+  ok(res, { prompts: samplePrompts(6) });
+}));
+
 router.get("/prompt-categories", wrap(async (req, res) => {
   ok(res, { categories: PROMPT_CATEGORIES });
 }));

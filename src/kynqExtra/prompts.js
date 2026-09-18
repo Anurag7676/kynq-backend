@@ -50,6 +50,13 @@ const PROMPTS = {
   ],
 };
 
+// A handful of prompts across every category — for the landing page.
+export function samplePrompts(n = 6) {
+  const all = PROMPT_CATEGORIES.flatMap((c) => (PROMPTS[c] ?? []).map((text) => ({ category: c, text })));
+  for (let i = all.length - 1; i > 0; i -= 1) { const j = Math.floor(Math.random() * (i + 1)); [all[i], all[j]] = [all[j], all[i]]; }
+  return all.slice(0, n);
+}
+
 export function getRandomPrompt(category) {
   const cat = PROMPT_CATEGORIES.includes(category) ? category : PROMPT_CATEGORIES[Math.floor(Math.random() * PROMPT_CATEGORIES.length)];
   const list = PROMPTS[cat];
