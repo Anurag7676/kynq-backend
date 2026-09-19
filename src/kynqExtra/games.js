@@ -58,15 +58,23 @@ const TRUTH_PROMPTS = [
   "what's something about you most people get wrong?",
   "if you could redo one decision, what would it be?",
 ];
+// CURATION RULE (Master Spec v3 §4) — every dare must be:
+//   • about the person doing it, never the OTHER person (no impressions of,
+//     nicknames for, or judgements about a stranger → that's humiliation);
+//   • free of requests for personal information or private content (no camera
+//     roll, messages, socials, address, surroundings);
+//   • not dangerous, not sexual, not humiliating;
+//   • skippable at no cost — nothing here is ever "forced".
+// User-submitted dares are not supported in the MVP; this list is the only source.
 const DARE_PROMPTS = [
-  "do your best impression of the other person",
   "talk in an accent for the next 2 minutes",
   "tell a joke — bonus points if it's actually funny",
-  "show the last photo in your camera roll (if it's appropriate)",
   "sing the chorus of your most-played song",
   "describe your day using only questions",
   "do 10 jumping jacks on camera",
-  "make up a nickname for the other person and use it for 3 rounds",
+  "do your best movie-trailer voice for 10 seconds",
+  "give yourself a superhero name and explain your power",
+  "invent a 10-second jingle for your favourite snack",
 ];
 
 const QUIZ_QUESTIONS = [

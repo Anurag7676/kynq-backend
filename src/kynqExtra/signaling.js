@@ -13,10 +13,10 @@ import { addChatMessage, markMessageStatus, setReaction } from "./chat-store.js"
 import { getRandomPrompt } from "./prompts.js";
 import { submitReport } from "./reports.js";
 import { blockUser } from "./blocks.js";
-import { credit, todayKey } from "./wallet.js";
 import { sendGift as sendGiftToPeer, GiftError } from "./gifts.js";
 import { attachPulse, recordGift, recordGameWin } from "./pulse.js";
 import { dropOnBlock } from "./friends.js";
+import { startMeter, markConnected, pauseMeter, endMeter, onReward, ensureChatMeterIndexes } from "./chat-meter.js";
 
 // scopedId -> Set<socketId>, so REST routes (friend requests, DMs) can push
 // realtime events to a user wherever they are in the app.
@@ -62,6 +62,7 @@ async function leaveActiveCall(io, socket, reason) {
   const callId = socket.data.currentCallId;
   if (!callId) return;
 
+  await endMeter(callId); // bank the eligible chat time before the call closes
   await endCall(callId, reason).catch((err) => console.error("[kynqExtra] endCall failed:", err));
   socket.to(callId).emit("call:ended", { reason });
   clearCallState(io, callId);
@@ -79,6 +80,7 @@ const pendingDisconnects = new Map();
 function scheduleGraceEnd(io, scopedId, callId, peerScopedId) {
   const timer = setTimeout(async () => {
     pendingDisconnects.delete(scopedId);
+    await endMeter(callId);
     await endCall(callId, "peer_disconnected").catch((err) => console.error("[kynqExtra] endCall failed:", err));
     io.to(callId).emit("call:ended", { reason: "peer_disconnected" });
     clearCallState(io, callId);
@@ -114,6 +116,7 @@ async function tryResumeCall(io, socket) {
   socket.join(callId);
   socket.data.currentCallId = callId;
   socket.data.peerScopedId = peerScopedId;
+  startMeter(callId, scopedId, peerScopedId); // no-op if it survived; recreated after a restart
 
   // Tell the reconnecting client which call/peer to resume, and tell
   // whoever's still in the room that the peer is back — both sides then
@@ -133,6 +136,8 @@ export function initSignaling(server) {
   });
   attachPulse(io);
   ioRef = io;
+  ensureChatMeterIndexes().catch(() => {}); // warm-up only; writes await it themselves
+  onReward((userId, payload) => emitToUser(userId, "wallet:updated", payload));
 
   io.use(async (socket, next) => {
     try {
@@ -169,9 +174,6 @@ export function initSignaling(server) {
           locationScope: payload.locationScope,
           location: payload.location,
         });
-        // "Daily activity" coins — idempotency key includes today's date,
-        // so this pays out once per calendar day, not once per queue join.
-        credit(scopedId, "daily_activity", { refId: todayKey() }).catch((err) => console.error("[kynqExtra] wallet credit failed:", err));
         ack?.({ ok: true });
       } catch (err) {
         ack?.({ ok: false, reason: err.message });
@@ -278,15 +280,9 @@ export function initSignaling(server) {
           winner: result.winner ?? null,
         });
 
-        if (result.winner) {
-          // Turn-based games (tic-tac-toe) have exactly one win ever per
-          // gameId. Round-based games (RPS, quiz, guess-the-word) can be
-          // won repeatedly within the same gameId — round differentiates
-          // those so each round's win is credited once, not just the first.
-          const round = updated.state?.round ?? updated.state?.lastGuess?.guess ?? "final";
-          credit(result.winner, "game_win", { refId: `${gameId}:${round}` }).catch((err) => console.error("[kynqExtra] wallet credit failed:", err));
-          recordGameWin(session.gameType, socket.data.city);
-        }
+        // Winning no longer pays Koins (Master Spec v3 §2: "No +5 Koins
+        // game-win reward in the MVP") — it only feeds the public pulse.
+        if (result.winner) recordGameWin(session.gameType, socket.data.city);
         ack?.({ ok: true });
       } catch (err) {
         ack?.({ ok: false, reason: err.message });
@@ -296,6 +292,12 @@ export function initSignaling(server) {
     // ─── Call lifecycle ───
     // Acks only once the call is actually left — a client that re-queues
     // before this completes would be rejected with "already in a call".
+    // Sent every few seconds by a client whose RTCPeerConnection is
+    // "connected". Eligible chat time only runs while BOTH sides are beating.
+    socket.on("call:connected", () => {
+      if (socket.data.currentCallId) markConnected(socket.data.currentCallId, scopedId);
+    });
+
     socket.on("call:next", async (payload, ack) => {
       await leaveActiveCall(io, socket, "next");
       ack?.({ ok: true });
@@ -362,6 +364,7 @@ export function initSignaling(server) {
       // returns (the socket object is being destroyed), so state that
       // needs to survive to the timeout lives in pendingDisconnects, not
       // on the socket.
+      pauseMeter(callId).catch(() => {});
       socket.to(callId).emit("call:peer-disconnected", {});
       scheduleGraceEnd(io, scopedId, callId, peerScopedId);
     });

@@ -1,5 +1,5 @@
 import express from "express";
-import { getScopedId } from "../session.js";
+import { getScopedId, getOrCreateSession } from "../session.js";
 import { ok, created, badRequest, unauthorized, forbidden, wrap } from "../http.js";
 import { getExtraProfile, setExtraProfile, getPublicName, INTEREST_TOPICS, LOCATION_SCOPES, INDIAN_CITIES } from "../../kynqExtra/profile.js";
 import { mintTurnCredentials, turnConfigured } from "../../kynqExtra/turnCredentials.js";
@@ -8,6 +8,9 @@ import { searchGifs, trendingGifs, giphyConfigured } from "../../kynqExtra/giphy
 import { PROMPT_CATEGORIES, samplePrompts } from "../../kynqExtra/prompts.js";
 import { getPulse } from "../../kynqExtra/pulse.js";
 import * as friends from "../../kynqExtra/friends.js";
+import { getChatProgress } from "../../kynqExtra/chat-meter.js";
+import { getOrCreateCode, attachReferral, referralSummary, ReferralError } from "../../kynqExtra/referrals.js";
+import { ECONOMY } from "../../kynqExtra/economy.js";
 import { emitToUser } from "../../kynqExtra/signaling.js";
 import { listCallsForUser } from "../../kynqExtra/calls-store.js";
 import { getBalance, getHistory, EARN_RULES } from "../../kynqExtra/wallet.js";
@@ -106,8 +109,8 @@ router.get("/gifs", wrap(async (req, res) => {
 router.get("/wallet", wrap(async (req, res) => {
   const { userId } = await getScopedId(req, res);
   if (!userId) return unauthorized(res, "sign in to use kynq extra");
-  const [balance, history] = await Promise.all([getBalance(userId), getHistory(userId)]);
-  ok(res, { balance, history, earnRules: EARN_RULES });
+  const [balance, history, chat] = await Promise.all([getBalance(userId), getHistory(userId), getChatProgress(userId)]);
+  ok(res, { balance, history, earnRules: EARN_RULES, chat });
 }));
 
 // GET /api/kynq-extra/calls — past 1-to-1 calls, most recent first.
@@ -319,6 +322,31 @@ router.post("/admin/users/:userId/restrict", auth, requireAdmin, wrap(async (req
   const restricted = req.body?.restricted !== false;
   await setRestricted(req.params.userId, restricted);
   ok(res, { userId: req.params.userId, restricted });
+}));
+
+// ─── Referrals (Master Spec v3 §2, §7) ───
+// The device id is the 1-year anonymous browser cookie: it survives sign-out,
+// so "sign out → new account → redeem my own invite" is caught.
+router.get("/referral", wrap(async (req, res) => {
+  const { userId } = await getScopedId(req, res);
+  if (!userId) return unauthorized(res, "sign in to use kynq extra");
+  const { sessionId } = getOrCreateSession(req, res);
+  const [code, stats] = await Promise.all([getOrCreateCode(userId, sessionId), referralSummary(userId)]);
+  ok(res, { code, stats, requiredMinutes: ECONOMY.chat.blockSeconds / 60 });
+}));
+
+router.post("/referral/attach", wrap(async (req, res) => {
+  const { userId } = await getScopedId(req, res);
+  if (!userId) return unauthorized(res, "sign in to use kynq extra");
+  const { sessionId } = getOrCreateSession(req, res);
+  try {
+    const { eligibleSeconds } = await getChatProgress(userId);
+    await attachReferral(userId, req.body?.code, { deviceId: sessionId, eligibleSeconds });
+    ok(res, { attached: true });
+  } catch (err) {
+    if (err instanceof ReferralError) return res.status(err.status).json({ success: false, message: err.message });
+    throw err;
+  }
 }));
 
 // ─── Friends + direct messages ───

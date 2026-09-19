@@ -11,7 +11,7 @@
 import { isBlockedEitherWay } from "./blocks.js";
 import { createCall, wasRecentlyMatched } from "./calls-store.js";
 import { recordMatch } from "./pulse.js";
-import { credit } from "./wallet.js";
+import { startMeter } from "./chat-meter.js";
 
 const TICK_MS = 1000;
 
@@ -104,11 +104,9 @@ export async function runMatchTick(io) {
 
     // eslint-disable-next-line no-await-in-loop
     const call = await createCall(entry.scopedId, match.scopedId);
-    // "First chat" coins — credit() is idempotent per (type, userId), so
-    // this only actually pays out the very first time ever for each user;
-    // every call after that is a no-op, not a re-earn.
-    credit(entry.scopedId, "first_chat").catch((err) => console.error("[kynqExtra] wallet credit failed:", err));
-    credit(match.scopedId, "first_chat").catch((err) => console.error("[kynqExtra] wallet credit failed:", err));
+    // Koins are earned by eligible chat TIME now (Master Spec v3 §2), not by
+    // merely being matched. The meter runs once both sides report connected.
+    startMeter(call.id, entry.scopedId, match.scopedId);
 
     const roomId = call.id;
     const socketA = io.sockets.sockets.get(entry.socketId);

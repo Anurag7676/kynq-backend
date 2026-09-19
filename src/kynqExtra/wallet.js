@@ -13,16 +13,21 @@
 // ({ _key, ...fields }), so existing data keeps working.
 import mongoose from "mongoose";
 import { makeId } from "../gift/store.js";
+import { ECONOMY } from "./economy.js";
 
 const TX = "wallet_transactions";
 const BAL = "wallet_balances";
 const coll = (name) => mongoose.connection.collection(name);
 
+// Master Spec v3 §2 — Koins are earned through eligible chat time and
+// referrals ONLY. The old daily-activity, game-win and challenge-streak
+// rewards are gone; their past ledger rows remain as history (each row stores
+// its own `reason`, so they still read correctly). Amounts come from
+// economy.js so there is one place to change them.
 export const EARN_RULES = {
-  first_chat: { amount: 20, label: "completed your first chat" },
-  daily_activity: { amount: 10, label: "daily activity" },
-  game_win: { amount: 5, label: "won a game" },
-  challenge_streak: { amount: 15, label: "maintained your streak" },
+  chat_minutes: { amount: ECONOMY.chat.rewardPerBlock, label: `every ${ECONOMY.chat.blockSeconds / 60} minutes of chat` },
+  first_chat: { amount: ECONOMY.chat.firstChatBonus, label: `first ${ECONOMY.chat.blockSeconds / 60} minutes of chat (one time)` },
+  referral: { amount: ECONOMY.referral.reward, label: `a friend you invited chats for ${ECONOMY.chat.blockSeconds / 60} minutes` },
 };
 
 export class InsufficientBalanceError extends Error {
@@ -83,12 +88,14 @@ export async function credit(userId, type, { refId, note, amount } = {}) {
   try {
     await coll(TX).insertOne(tx);
   } catch (err) {
-    if (err?.code === 11000) return strip(await coll(TX).findOne({ _key: key })); // already applied
+    // Already applied: return the original row, flagged, so a caller can tell
+    // "paid just now" from "was paid before" without guessing.
+    if (err?.code === 11000) return { ...strip(await coll(TX).findOne({ _key: key })), duplicate: true };
     throw err;
   }
   const bal = await bumpBalance(userId, value);
   await coll(TX).updateOne({ _key: key }, { $set: { balanceAfter: bal?.balance ?? null } });
-  return { ...strip(tx), balanceAfter: bal?.balance ?? null };
+  return { ...strip(tx), balanceAfter: bal?.balance ?? null, duplicate: false };
 }
 
 /**
