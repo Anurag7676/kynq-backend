@@ -11,6 +11,7 @@ import * as friends from "../../kynqExtra/friends.js";
 import { getChatProgress } from "../../kynqExtra/chat-meter.js";
 import { getOrCreateCode, attachReferral, referralSummary, ReferralError } from "../../kynqExtra/referrals.js";
 import { ECONOMY } from "../../kynqExtra/economy.js";
+import { activePassExpiry } from "../../kynqExtra/gender-pass.js";
 import { filterCatalog, activeUnlocks, unlockFilter, FilterError, InsufficientBalanceError as FilterInsufficient } from "../../kynqExtra/filters.js";
 import { canSkip } from "../../kynqExtra/games.js";
 import { emitToUser } from "../../kynqExtra/signaling.js";
@@ -111,8 +112,8 @@ router.get("/gifs", wrap(async (req, res) => {
 router.get("/wallet", wrap(async (req, res) => {
   const { userId } = await getScopedId(req, res);
   if (!userId) return unauthorized(res, "sign in to use kynq extra");
-  const [balance, history, chat] = await Promise.all([getBalance(userId), getHistory(userId), getChatProgress(userId)]);
-  ok(res, { balance, history, earnRules: EARN_RULES, chat });
+  const [balance, history, chat, genderPassExpiresAt] = await Promise.all([getBalance(userId), getHistory(userId), getChatProgress(userId), activePassExpiry(userId)]);
+  ok(res, { balance, history, earnRules: EARN_RULES, chat, genderPassExpiresAt, now: Date.now() });
 }));
 
 // GET /api/kynq-extra/calls — past 1-to-1 calls, most recent first.
@@ -335,7 +336,7 @@ router.get("/economy", wrap(async (req, res) => {
     chat: { minutesPerReward: ECONOMY.chat.blockSeconds / 60, rewardPerBlock: ECONOMY.chat.rewardPerBlock, firstChatBonus: ECONOMY.chat.firstChatBonus },
     referral: { reward: ECONOMY.referral.reward },
     games,
-    genderPreference: { pricePerMatch: ECONOMY.genderPreference.pricePerMatch },
+    genderPreference: { price: ECONOMY.genderPreference.price, passMinutes: ECONOMY.genderPreference.passMs / 60000 },
     filters: filterCatalog(),
   });
 }));

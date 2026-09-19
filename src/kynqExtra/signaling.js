@@ -20,6 +20,7 @@ import crypto from "crypto";
 import { debit, credit, getBalance, InsufficientBalanceError } from "./wallet.js";
 import { ECONOMY, gamePrice } from "./economy.js";
 import { getExtraProfile } from "./profile.js";
+import { activePassExpiry } from "./gender-pass.js";
 import { startMeter, markConnected, pauseMeter, endMeter, onReward, ensureChatMeterIndexes } from "./chat-meter.js";
 
 // scopedId -> Set<socketId>, so REST routes (friend requests, DMs) can push
@@ -188,8 +189,8 @@ export function initSignaling(server) {
         // Gender preference (Master Spec v3 §5) is a paid extra. The seeker's
         // OWN gender always comes from their saved profile, never the payload.
         const wanted = ["male", "female", "other"].includes(payload.genderPreference) ? payload.genderPreference : null;
-        if (wanted) {
-          const price = ECONOMY.genderPreference.pricePerMatch;
+        if (wanted && !(await activePassExpiry(scopedId))) { // a live pass already covers it
+          const price = ECONOMY.genderPreference.price;
           const balance = await getBalance(scopedId);
           if (balance < price) return ack?.({ ok: false, reason: "not enough Koins for a gender preference", code: "insufficient", balance, price });
         }

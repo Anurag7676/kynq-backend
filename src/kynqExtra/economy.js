@@ -10,11 +10,12 @@ export const ECONOMY = {
     blockSeconds: 10 * 60,     // "every 10 eligible chat minutes"
     rewardPerBlock: 10,        // "+10 Koins"
     firstChatBonus: 20,        // "+20 Koins after first 10 eligible minutes", once ever
-    // Spec §2: "no daily cap on recurring chat rewards" — so this is OFF.
-    // It exists as a lever: set to a number of seconds (e.g. 30 * 60) to stop
-    // rewarding the SAME two people after that much chat per day. It never
-    // limits how much one user can earn overall. null = disabled.
-    perPairDailyRewardedSecondsCap: null,
+    // DECIDED by the product owner (2026-09-20). Spec §2 says "no daily cap" —
+    // and there still is none on what a USER can earn. This only stops the
+    // SAME TWO PEOPLE being rewarded after 30 minutes together per day, which
+    // shuts down two idle accounts farming each other around the clock. Real
+    // users meeting different people never reach it. null = disabled.
+    perPairDailyRewardedSecondsCap: 30 * 60,
     // Clients heartbeat ~every 5s while their video link is "connected". If
     // either side misses this long, the clock stops ("disconnected time does
     // not count") until both are beating again.
@@ -27,34 +28,38 @@ export const ECONOMY = {
   },
 
   games: {
-    // Spec §3 lists Tic Tac Toe and Rock Paper Scissors as "Free — proposed".
-    // The rest of the list was cut off in the spec, so everything below the
-    // first two is PROPOSED. 0 = free (starts instantly, no invitation).
-    // >0 = paid: starter pays, the other player accepts/declines and plays free.
+    // CONFIRMED by the product owner (2026-09-20). The spec's list was cut
+    // off after the first two; these prices were proposed and then approved.
+    // 0 = free (starts instantly, no invitation). >0 = paid: the starter pays,
+    // the other player accepts/declines and plays free. (The spec mentions 8
+    // games; 7 exist — an 8th has not been specified.)
     prices: {
       "tic-tac-toe": 0,
       "rock-paper-scissors": 0,
-      "this-or-that": 0,       // PROPOSED (the unpriced fragment in the spec)
-      "would-you-rather": 5,   // PROPOSED
-      "quick-quiz": 5,         // PROPOSED
-      "guess-the-word": 5,     // PROPOSED
-      "truth-or-dare": 10,     // PROPOSED
+      "this-or-that": 0,
+      "would-you-rather": 5,
+      "quick-quiz": 5,
+      "guess-the-word": 5,
+      "truth-or-dare": 10,
     },
     inviteTtlMs: 30_000,
   },
 
   genderPreference: {
-    // Spec §5: "10 Koins per 5 MIN match … deducted only when the matching
-    // preference successfully results in a match." Read as: 10 Koins charged
-    // once per successful preference match (PROPOSED reading of "5 MIN").
-    pricePerMatch: 10,
+    // DECIDED by the product owner (2026-09-20): "10 Koins per 5 MIN" is a
+    // 5-MINUTE PASS. Charged at the first successful preference match (spec:
+    // "deducted only when the matching preference successfully results in a
+    // match"), runs 5 minutes from then; further preference matches inside the
+    // window are free. See gender-pass.js.
+    price: 10,
+    passMs: 5 * 60 * 1000,
   },
 
   filters: {
     price: 10,                          // per premium filter
     unlockMs: 24 * 60 * 60 * 1000,      // "unlocked for 24 hours from purchase"
-    // Which lenses are premium is not in the spec (PROPOSED). Everything not
-    // listed — colour filters, Beauty, and the other lenses — stays free.
+    // CONFIRMED by the product owner (2026-09-20): every lens is premium
+    // except Heart shades and Halo. Colour filters and Beauty stay free.
     premiumLenses: ["puppy", "kitty", "bunny", "crown", "flowers", "butterflies", "blush"],
   },
 };

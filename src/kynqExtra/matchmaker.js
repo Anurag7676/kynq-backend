@@ -15,6 +15,7 @@ import crypto from "crypto";
 import { startMeter } from "./chat-meter.js";
 import { debit, credit, InsufficientBalanceError } from "./wallet.js";
 import { ECONOMY } from "./economy.js";
+import { activePassExpiry, startPass, cancelPass } from "./gender-pass.js";
 
 const TICK_MS = 1000;
 
@@ -77,14 +78,17 @@ function genderCompatible(a, b) {
 // or the scopedId whose preference could not be paid for (that pair is
 // abandoned; anything already charged for it is refunded).
 async function chargePreferences(a, b) {
-  const price = ECONOMY.genderPreference.pricePerMatch;
+  const price = ECONOMY.genderPreference.price;
   const chargeId = crypto.randomUUID();
   const paid = [];
   for (const e of [a, b]) {
     if (!e.genderPref) continue;
+    // A live 5-minute pass covers this match — nothing to charge.
+    // eslint-disable-next-line no-await-in-loop
+    if (await activePassExpiry(e.scopedId)) continue;
     try {
       // eslint-disable-next-line no-await-in-loop
-      await debit(e.scopedId, "gender_preference", price, { refId: chargeId, note: "matched with your gender preference" });
+      await debit(e.scopedId, "gender_preference", price, { refId: chargeId, note: `gender preference — ${ECONOMY.genderPreference.passMs / 60000}-minute pass` });
       paid.push(e.scopedId);
     } catch (err) {
       for (const id of paid) await credit(id, "gender_preference_refund", { refId: chargeId, amount: price, note: "match didn't go ahead — refunded" }).catch(() => {}); // eslint-disable-line no-await-in-loop
@@ -163,11 +167,17 @@ export async function runMatchTick(io) {
       call = await createCall(entry.scopedId, match.scopedId);
     } catch (err) {
       // Charged for a match that never happened → give it straight back.
-      for (const id of charge.paid ?? []) await credit(id, "gender_preference_refund", { refId: charge.chargeId, amount: ECONOMY.genderPreference.pricePerMatch, note: "match didn't go ahead — refunded" }).catch(() => {}); // eslint-disable-line no-await-in-loop
+      for (const id of charge.paid ?? []) await credit(id, "gender_preference_refund", { refId: charge.chargeId, amount: ECONOMY.genderPreference.price, note: "match didn't go ahead — refunded" }).catch(() => {}); // eslint-disable-line no-await-in-loop
+      for (const id of charge.paid ?? []) await cancelPass(id, charge.chargeId).catch(() => {}); // eslint-disable-line no-await-in-loop
       console.error("[kynqExtra] createCall failed:", err);
       continue;
     }
-    for (const id of charge.paid ?? []) io.to((id === entry.scopedId ? entry : match).socketId).emit("wallet:updated", { spent: ECONOMY.genderPreference.pricePerMatch, reason: "gender_preference" });
+    // The match is real → the pass they just paid for starts NOW.
+    for (const id of charge.paid ?? []) {
+      // eslint-disable-next-line no-await-in-loop
+      const passExpiresAt = await startPass(id, charge.chargeId, call.startedAt ?? Date.now()).catch(() => 0);
+      io.to((id === entry.scopedId ? entry : match).socketId).emit("wallet:updated", { spent: ECONOMY.genderPreference.price, reason: "gender_preference", passExpiresAt });
+    }
     // Koins are earned by eligible chat TIME now (Master Spec v3 §2), not by
     // merely being matched. The meter runs once both sides report connected.
     startMeter(call.id, entry.scopedId, match.scopedId);
