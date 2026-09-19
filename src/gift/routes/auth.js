@@ -45,6 +45,50 @@ router.post("/request-otp", otpLimiter, wrap(async (req, res) => {
   ok(res, { ok: true, message: "if that email exists, a code is on its way." });
 }));
 
+// ─── Sign in with Google (Master Spec v3 §8) ───
+// Enabled purely by configuration: set GOOGLE_CLIENT_ID (an OAuth "Web
+// application" client id from Google Cloud) in Backend/.env and restart. The
+// frontend reads the id from /google/config at runtime, so it needs no rebuild.
+// With no id configured this is inert and email codes remain the way in.
+//
+// The 18+ check is unchanged and still applies to Google sign-ups: a new
+// account has no date of birth, so Kynq Extra's onboarding gate stops it until
+// one is confirmed. (Google does not give us a verified age.)
+router.get("/google/config", wrap(async (req, res) => {
+  const clientId = process.env.GOOGLE_CLIENT_ID || null;
+  ok(res, { enabled: !!clientId, clientId });
+}));
+
+router.post("/google", otpLimiter, wrap(async (req, res) => {
+  const clientId = process.env.GOOGLE_CLIENT_ID;
+  if (!clientId) return res.status(503).json({ success: false, message: "Google sign-in isn't set up yet." });
+  const credential = req.body?.credential;
+  const next = safeNext(req.body?.next);
+  if (!credential || typeof credential !== "string") return badRequest(res, "missing Google credential");
+
+  // Google verifies the ID token's signature and expiry for us. We must still
+  // check it was issued FOR THIS APP (aud) — otherwise a token minted for any
+  // other site's Google login would sign people in here.
+  let t;
+  try {
+    const r = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(credential)}`);
+    if (!r.ok) return unauthorized(res, "Google couldn't verify that sign-in. Please try again.");
+    t = await r.json();
+  } catch {
+    return res.status(502).json({ success: false, message: "Couldn't reach Google. Please try again." });
+  }
+  const issuerOk = t.iss === "accounts.google.com" || t.iss === "https://accounts.google.com";
+  if (t.aud !== clientId || !issuerOk) return unauthorized(res, "That sign-in wasn't issued for kynq.");
+  if (!t.email || String(t.email_verified) !== "true") return unauthorized(res, "That Google account's email isn't verified.");
+  if (Number(t.exp) * 1000 <= Date.now()) return unauthorized(res, "That sign-in has expired. Please try again.");
+
+  const user = await getOrCreateUser(t.email, t.name);
+  const { sessionId: anonSessionId } = getOrCreateSession(req, res);
+  await mergeAnonymousIntoUser(anonSessionId, user.id);
+  await signIn(res, user.id);
+  ok(res, { ok: true, user, next });
+}));
+
 // POST /api/auth/verify-otp — verify the code, sign in, fold in the guest cart
 router.post("/verify-otp", otpLimiter, wrap(async (req, res) => {
   const email = req.body?.email;
