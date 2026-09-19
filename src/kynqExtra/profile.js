@@ -34,6 +34,8 @@ export const INTEREST_TOPICS = [
   "memes", "deep-talks", "travel", "food", "sports", "art", "technology",
   "fitness", "random",
 ];
+// Self-declared and unverifiable — see the honesty note in matchmaker.js.
+export const GENDERS = ["male", "female", "other"];
 export const LOCATION_SCOPES = ["same-city", "same-state", "same-country", "worldwide"];
 
 // kynq operates in India (INR-only throughout the rest of the site), so
@@ -82,13 +84,14 @@ export async function getExtraProfile(userId) {
     state: user.state ?? null,
     country: user.city ? "India" : null,
     bio: user.bio ?? "",
+    gender: user.gender ?? null,
   };
 }
 
 // Set once at Kynq Extra onboarding. dob is immutable after the first
 // successful set — resubmitting a different DOB to game the age gate is
 // rejected, not silently overwritten.
-export async function setExtraProfile(userId, { dob, interests, locationScope, city, bio }) {
+export async function setExtraProfile(userId, { dob, interests, locationScope, city, bio, gender }) {
   const user = await findUserById(userId);
   if (!user) throw new Error("user not found");
 
@@ -116,6 +119,10 @@ export async function setExtraProfile(userId, { dob, interests, locationScope, c
     patch.state = match.state;
   }
   if (bio != null) patch.bio = String(bio).slice(0, 200);
+  if (gender !== undefined) {
+    if (gender !== null && !GENDERS.includes(gender)) throw new Error("invalid gender");
+    patch.gender = gender;
+  }
 
   const next = { ...user, ...patch };
   await users.set(user.email.toLowerCase().trim(), next);

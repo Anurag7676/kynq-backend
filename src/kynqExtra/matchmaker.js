@@ -11,7 +11,10 @@
 import { isBlockedEitherWay } from "./blocks.js";
 import { createCall, wasRecentlyMatched } from "./calls-store.js";
 import { recordMatch } from "./pulse.js";
+import crypto from "crypto";
 import { startMeter } from "./chat-meter.js";
+import { debit, credit, InsufficientBalanceError } from "./wallet.js";
+import { ECONOMY } from "./economy.js";
 
 const TICK_MS = 1000;
 
@@ -19,13 +22,15 @@ const TICK_MS = 1000;
 const queue = new Map();
 let tickHandle = null;
 
-export function joinQueue({ scopedId, socketId, topics, locationScope, location }) {
+export function joinQueue({ scopedId, socketId, topics, locationScope, location, gender, genderPref }) {
   queue.set(scopedId, {
     scopedId,
     socketId,
     topics: topics ?? [],
     locationScope: locationScope ?? "worldwide",
     location: location ?? {}, // { city, state, country } — best-effort, from client/IP
+    gender: gender ?? null,         // from the saved profile (server-side)
+    genderPref: genderPref ?? null, // paid extra; null = anyone
     joinedAt: Date.now(),
   });
 }
@@ -55,6 +60,41 @@ function locationCompatible(a, b) {
   return false;
 }
 
+// Gender preference (Master Spec v3 §5). HONESTY NOTE: gender is self-declared
+// and cannot be verified, so this filters on what people SAY. Someone who has
+// not declared a gender can never satisfy a preference (they still match
+// everyone who has none).
+function genderCompatible(a, b) {
+  if (a.genderPref && b.gender !== a.genderPref) return false;
+  if (b.genderPref && a.gender !== b.genderPref) return false;
+  return true;
+}
+
+// "Koins are deducted only when the matching preference successfully results
+// in a match." So the charge happens at the moment of pairing — and BEFORE the
+// call is created, so nobody can join with 10 Koins, spend them while queued,
+// and get the preference for free. Returns null when the pair can go ahead,
+// or the scopedId whose preference could not be paid for (that pair is
+// abandoned; anything already charged for it is refunded).
+async function chargePreferences(a, b) {
+  const price = ECONOMY.genderPreference.pricePerMatch;
+  const chargeId = crypto.randomUUID();
+  const paid = [];
+  for (const e of [a, b]) {
+    if (!e.genderPref) continue;
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      await debit(e.scopedId, "gender_preference", price, { refId: chargeId, note: "matched with your gender preference" });
+      paid.push(e.scopedId);
+    } catch (err) {
+      for (const id of paid) await credit(id, "gender_preference_refund", { refId: chargeId, amount: price, note: "match didn't go ahead — refunded" }).catch(() => {}); // eslint-disable-line no-await-in-loop
+      if (err instanceof InsufficientBalanceError) return { failed: e.scopedId, chargeId };
+      throw err;
+    }
+  }
+  return { failed: null, chargeId, paid };
+}
+
 function topicOverlapScore(a, b) {
   if (a.topics.length === 0 || b.topics.length === 0) return 0; // no filter = compatible, no bonus
   const overlap = a.topics.filter((t) => b.topics.includes(t)).length;
@@ -67,6 +107,7 @@ async function findMatchFor(entry, candidates) {
   for (const candidate of candidates) {
     if (candidate.scopedId === entry.scopedId) continue;
     if (!locationCompatible(entry, candidate)) continue;
+    if (!genderCompatible(entry, candidate)) continue;
     // eslint-disable-next-line no-await-in-loop
     if (await isBlockedEitherWay(entry.scopedId, candidate.scopedId)) continue;
     // eslint-disable-next-line no-await-in-loop
@@ -97,13 +138,36 @@ export async function runMatchTick(io) {
     const match = await findMatchFor(entry, candidates);
     if (!match) continue;
 
+    // Paid preference: charge now, before anything is committed.
+    let charge = { failed: null, paid: [] };
+    if (entry.genderPref || match.genderPref) {
+      // eslint-disable-next-line no-await-in-loop
+      charge = await chargePreferences(entry, match).catch((err) => { console.error("[kynqExtra] preference charge failed:", err); return { failed: "error", paid: [] }; });
+      if (charge.failed) {
+        // Can't pay any more → drop just their preference and let them keep
+        // searching as a normal (free) match. The other person is untouched.
+        const broke = queue.get(charge.failed);
+        if (broke) { broke.genderPref = null; io.to(broke.socketId).emit("queue:preference-dropped", { reason: "insufficient" }); }
+        continue;
+      }
+    }
+
     matchedThisTick.add(entry.scopedId);
     matchedThisTick.add(match.scopedId);
     queue.delete(entry.scopedId);
     queue.delete(match.scopedId);
 
-    // eslint-disable-next-line no-await-in-loop
-    const call = await createCall(entry.scopedId, match.scopedId);
+    let call;
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      call = await createCall(entry.scopedId, match.scopedId);
+    } catch (err) {
+      // Charged for a match that never happened → give it straight back.
+      for (const id of charge.paid ?? []) await credit(id, "gender_preference_refund", { refId: charge.chargeId, amount: ECONOMY.genderPreference.pricePerMatch, note: "match didn't go ahead — refunded" }).catch(() => {}); // eslint-disable-line no-await-in-loop
+      console.error("[kynqExtra] createCall failed:", err);
+      continue;
+    }
+    for (const id of charge.paid ?? []) io.to((id === entry.scopedId ? entry : match).socketId).emit("wallet:updated", { spent: ECONOMY.genderPreference.pricePerMatch, reason: "gender_preference" });
     // Koins are earned by eligible chat TIME now (Master Spec v3 §2), not by
     // merely being matched. The meter runs once both sides report connected.
     startMeter(call.id, entry.scopedId, match.scopedId);

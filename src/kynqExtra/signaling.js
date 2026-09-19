@@ -16,6 +16,10 @@ import { blockUser } from "./blocks.js";
 import { sendGift as sendGiftToPeer, GiftError } from "./gifts.js";
 import { attachPulse, recordGift, recordGameWin } from "./pulse.js";
 import { dropOnBlock } from "./friends.js";
+import crypto from "crypto";
+import { debit, credit, getBalance, InsufficientBalanceError } from "./wallet.js";
+import { ECONOMY, gamePrice } from "./economy.js";
+import { getExtraProfile } from "./profile.js";
 import { startMeter, markConnected, pauseMeter, endMeter, onReward, ensureChatMeterIndexes } from "./chat-meter.js";
 
 // scopedId -> Set<socketId>, so REST routes (friend requests, DMs) can push
@@ -42,6 +46,18 @@ function emitGameEvent(io, callId, gameType, eventName, basePayload) {
   }
 }
 
+// Paid-game invitations, one pending per call. callId -> { id, from, to,
+// gameType, price, timer }. In memory: an invitation is worthless after a
+// restart anyway, and no Koins move until it is accepted AND the game starts.
+const invites = new Map();
+function closeInvite(io, callId, reason) {
+  const inv = invites.get(callId);
+  if (!inv) return;
+  clearTimeout(inv.timer);
+  invites.delete(callId);
+  if (reason) io.to(callId).emit("game:invite:closed", { inviteId: inv.id, reason });
+}
+
 // Clears currentCallId/peerScopedId on every socket in the room — used
 // whenever a call ends, so a still-connected peer isn't left thinking
 // they're "already in a call" forever (there's no client round-trip that
@@ -63,6 +79,7 @@ async function leaveActiveCall(io, socket, reason) {
   if (!callId) return;
 
   await endMeter(callId); // bank the eligible chat time before the call closes
+  closeInvite(io, callId, null); // an unanswered game invitation dies with the call (it cost nothing)
   await endCall(callId, reason).catch((err) => console.error("[kynqExtra] endCall failed:", err));
   socket.to(callId).emit("call:ended", { reason });
   clearCallState(io, callId);
@@ -81,6 +98,7 @@ function scheduleGraceEnd(io, scopedId, callId, peerScopedId) {
   const timer = setTimeout(async () => {
     pendingDisconnects.delete(scopedId);
     await endMeter(callId);
+    closeInvite(io, callId, null);
     await endCall(callId, "peer_disconnected").catch((err) => console.error("[kynqExtra] endCall failed:", err));
     io.to(callId).emit("call:ended", { reason: "peer_disconnected" });
     clearCallState(io, callId);
@@ -167,12 +185,24 @@ export function initSignaling(server) {
         if (socket.data.currentCallId) return ack?.({ ok: false, reason: "already in a call" });
 
         socket.data.city = typeof payload.location?.city === "string" ? payload.location.city.slice(0, 40) : null;
+        // Gender preference (Master Spec v3 §5) is a paid extra. The seeker's
+        // OWN gender always comes from their saved profile, never the payload.
+        const wanted = ["male", "female", "other"].includes(payload.genderPreference) ? payload.genderPreference : null;
+        if (wanted) {
+          const price = ECONOMY.genderPreference.pricePerMatch;
+          const balance = await getBalance(scopedId);
+          if (balance < price) return ack?.({ ok: false, reason: "not enough Koins for a gender preference", code: "insufficient", balance, price });
+        }
+        const myProfile = await getExtraProfile(socket.data.userId).catch(() => null);
+
         matchmaker.joinQueue({
           scopedId,
           socketId: socket.id,
           topics: Array.isArray(payload.topics) ? payload.topics.slice(0, 3) : [],
           locationScope: payload.locationScope,
           location: payload.location,
+          gender: myProfile?.gender ?? null,
+          genderPref: wanted,
         });
         ack?.({ ok: true });
       } catch (err) {
@@ -237,6 +267,7 @@ export function initSignaling(server) {
       try {
         if (!callId || callId !== socket.data.currentCallId) return ack?.({ ok: false, reason: "not in this call" });
         if (!GAME_TYPES.includes(gameType)) return ack?.({ ok: false, reason: "unknown game" });
+        if (gamePrice(gameType) > 0) return ack?.({ ok: false, reason: "this game needs an invitation", code: "paid", price: gamePrice(gameType) });
 
         const call = await getCall(callId);
         if (!call || call.status !== "active") return ack?.({ ok: false, reason: "call not active" });
@@ -292,6 +323,89 @@ export function initSignaling(server) {
     // ─── Call lifecycle ───
     // Acks only once the call is actually left — a client that re-queues
     // before this completes would be rejected with "already in a call".
+    // ─── Paid games (Master Spec v3 §4) ───
+    // The starter pays; the other player accepts or declines and plays free.
+    // Order matters, and is the whole safety story:
+    //   invite (0 Koins) → accept → INITIALISE the game → only then DEBIT,
+    //   keyed by the game id (exactly-once) → announce. If initialising fails
+    //   nothing was ever charged; if announcing fails the fee is refunded.
+    socket.on("game:invite", async ({ callId, gameType } = {}, ack) => {
+      try {
+        if (!callId || callId !== socket.data.currentCallId) return ack?.({ ok: false, reason: "not in this call" });
+        if (!GAME_TYPES.includes(gameType)) return ack?.({ ok: false, reason: "unknown game" });
+        const price = gamePrice(gameType);
+        if (price <= 0) return ack?.({ ok: false, reason: "that game is free — just start it" });
+        if (invites.has(callId)) return ack?.({ ok: false, reason: "an invitation is already waiting" });
+        const balance = await getBalance(scopedId);
+        if (balance < price) return ack?.({ ok: false, reason: "not enough Koins", code: "insufficient", balance, price });
+
+        const inv = { id: crypto.randomUUID(), from: scopedId, to: socket.data.peerScopedId, gameType, price };
+        inv.timer = setTimeout(() => closeInvite(io, callId, "expired"), ECONOMY.games.inviteTtlMs);
+        invites.set(callId, inv);
+        // The invited player is told it costs THEM nothing.
+        socket.to(callId).emit("game:invited", { inviteId: inv.id, gameType, from: scopedId, price: 0, expiresInMs: ECONOMY.games.inviteTtlMs });
+        ack?.({ ok: true, inviteId: inv.id, price });
+      } catch (err) {
+        ack?.({ ok: false, reason: err.message });
+      }
+    });
+
+    socket.on("game:invite:cancel", ({ inviteId } = {}, ack) => {
+      const callId = socket.data.currentCallId;
+      const inv = invites.get(callId);
+      if (!inv || inv.id !== inviteId || inv.from !== scopedId) return ack?.({ ok: false });
+      closeInvite(io, callId, "cancelled");
+      ack?.({ ok: true });
+    });
+
+    socket.on("game:invite:respond", async ({ inviteId, accept } = {}, ack) => {
+      const callId = socket.data.currentCallId;
+      const inv = invites.get(callId);
+      if (!inv || inv.id !== inviteId) return ack?.({ ok: false, reason: "that invitation has expired" });
+      if (inv.to !== scopedId) return ack?.({ ok: false, reason: "only the invited player can answer" });
+      clearTimeout(inv.timer);
+      invites.delete(callId); // consumed — a second 'accept' can't start (or charge for) a second game
+
+      if (!accept) { // declining costs nobody anything
+        io.to(callId).emit("game:invite:closed", { inviteId, reason: "declined" });
+        return ack?.({ ok: true });
+      }
+
+      let session;
+      try {
+        const call = await getCall(callId);
+        if (!call || call.status !== "active") throw new Error("call not active");
+        const initialState = createInitialState(inv.gameType, call.participantA, call.participantB);
+        const firstTurn = TURN_BASED_GAMES.includes(inv.gameType) ? inv.from : null;
+        session = await createGameSession(callId, inv.gameType, initialState, firstTurn);
+      } catch (err) {
+        io.to(callId).emit("game:invite:closed", { inviteId, reason: "failed" }); // nothing was charged
+        return ack?.({ ok: false, reason: "the game couldn't start — no Koins were taken" });
+      }
+
+      try {
+        await debit(inv.from, "game_fee", inv.price, { refId: session.id, note: `started ${inv.gameType.replace(/-/g, " ")}` });
+      } catch (err) {
+        await updateGameSession(session.id, { status: "cancelled" }).catch(() => {});
+        const insufficient = err instanceof InsufficientBalanceError;
+        io.to(callId).emit("game:invite:closed", { inviteId, reason: insufficient ? "insufficient" : "failed" });
+        return ack?.({ ok: false, reason: insufficient ? "the starter no longer has enough Koins" : "the game couldn't start — no Koins were taken" });
+      }
+
+      try {
+        emitGameEvent(io, callId, inv.gameType, "game:started", { gameId: session.id, gameType: inv.gameType, state: session.state, turnOf: session.turnOf, paidBy: inv.from, price: inv.price });
+        emitToUser(inv.from, "wallet:updated", { spent: inv.price, reason: "game" });
+        ack?.({ ok: true, gameId: session.id });
+      } catch (err) {
+        // Charged, but the game never reached the players → full refund, once.
+        await credit(inv.from, "game_refund", { refId: session.id, amount: inv.price, note: "game failed to start — refunded" }).catch((e) => console.error("[kynqExtra] game refund failed:", e));
+        await updateGameSession(session.id, { status: "cancelled" }).catch(() => {});
+        emitToUser(inv.from, "wallet:updated", { earned: inv.price, reason: "refund" });
+        io.to(callId).emit("game:invite:closed", { inviteId, reason: "failed" });
+        ack?.({ ok: false, reason: "the game couldn't start — your Koins were refunded" });
+      }
+    });
+
     // Sent every few seconds by a client whose RTCPeerConnection is
     // "connected". Eligible chat time only runs while BOTH sides are beating.
     socket.on("call:connected", () => {

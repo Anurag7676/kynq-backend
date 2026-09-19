@@ -11,6 +11,8 @@ import * as friends from "../../kynqExtra/friends.js";
 import { getChatProgress } from "../../kynqExtra/chat-meter.js";
 import { getOrCreateCode, attachReferral, referralSummary, ReferralError } from "../../kynqExtra/referrals.js";
 import { ECONOMY } from "../../kynqExtra/economy.js";
+import { filterCatalog, activeUnlocks, unlockFilter, FilterError, InsufficientBalanceError as FilterInsufficient } from "../../kynqExtra/filters.js";
+import { canSkip } from "../../kynqExtra/games.js";
 import { emitToUser } from "../../kynqExtra/signaling.js";
 import { listCallsForUser } from "../../kynqExtra/calls-store.js";
 import { getBalance, getHistory, EARN_RULES } from "../../kynqExtra/wallet.js";
@@ -322,6 +324,40 @@ router.post("/admin/users/:userId/restrict", auth, requireAdmin, wrap(async (req
   const restricted = req.body?.restricted !== false;
   await setRestricted(req.params.userId, restricted);
   ok(res, { userId: req.params.userId, restricted });
+}));
+
+// ─── Economy (public) ───
+// The single source of prices for the UI. Nothing on the frontend hardcodes a
+// number — change economy.js and every screen follows.
+router.get("/economy", wrap(async (req, res) => {
+  const games = Object.fromEntries(Object.entries(ECONOMY.games.prices).map(([id, price]) => [id, { price, canSkip: canSkip(id) }]));
+  ok(res, {
+    chat: { minutesPerReward: ECONOMY.chat.blockSeconds / 60, rewardPerBlock: ECONOMY.chat.rewardPerBlock, firstChatBonus: ECONOMY.chat.firstChatBonus },
+    referral: { reward: ECONOMY.referral.reward },
+    games,
+    genderPreference: { pricePerMatch: ECONOMY.genderPreference.pricePerMatch },
+    filters: filterCatalog(),
+  });
+}));
+
+// ─── Premium face filters (Master Spec v3 §6) ───
+router.get("/filters", wrap(async (req, res) => {
+  const { userId } = await getScopedId(req, res);
+  if (!userId) return unauthorized(res, "sign in to use kynq extra");
+  ok(res, { ...filterCatalog(), unlocked: await activeUnlocks(userId), now: Date.now() });
+}));
+
+router.post("/filters/unlock", wrap(async (req, res) => {
+  const { userId } = await getScopedId(req, res);
+  if (!userId) return unauthorized(res, "sign in to use kynq extra");
+  try {
+    const r = await unlockFilter(userId, String(req.body?.lensId ?? ""));
+    ok(res, { ...r, unlocked: await activeUnlocks(userId), now: Date.now() });
+  } catch (err) {
+    if (err instanceof FilterInsufficient) return res.status(402).json({ success: false, code: "insufficient", message: "Not enough Koins", balance: err.balance, price: ECONOMY.filters.price });
+    if (err instanceof FilterError) return res.status(err.status).json({ success: false, message: err.message });
+    throw err;
+  }
 }));
 
 // ─── Referrals (Master Spec v3 §2, §7) ───

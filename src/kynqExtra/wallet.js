@@ -61,14 +61,48 @@ function keyFor(type, userId, refId) {
   return `${type}:${userId}:${refId ?? ""}`;
 }
 
-async function bumpBalance(userId, delta, filter = {}) {
+async function bumpBalance(userId, delta, filter = {}, session) {
   const r = await coll(BAL).findOneAndUpdate(
     { _key: userId, ...filter },
     { $inc: { balance: delta }, $set: { userId, updatedAt: Date.now() } },
-    { upsert: Object.keys(filter).length === 0, returnDocument: "after" }
+    { upsert: Object.keys(filter).length === 0, returnDocument: "after", ...(session ? { session } : {}) }
   );
   return r && ("value" in r ? r.value : r);
 }
+
+// ─── Atomicity ──────────────────────────────────────────────
+// A wallet operation is two writes: the ledger row and the balance. Done
+// separately they have bad in-between states:
+//   • debit decremented the balance BEFORE claiming the ledger key, so a
+//     concurrent duplicate (a double-click) on a tight balance hit the balance
+//     guard and was told "insufficient balance" for a purchase that succeeded;
+//   • a crash between the two writes either lost Koins with no record (debit)
+//     or recorded a credit that never reached the balance and could never be
+//     retried (the key was already taken).
+// Both writes therefore go in ONE transaction: both happen or neither does.
+// The unique ledger key still provides exactly-once — a concurrent duplicate
+// conflicts, is retried by the driver, then sees the committed row.
+// Transactions need a replica set (Atlas is one). On a standalone Mongo the
+// first attempt reports that, and we fall back to the sequential path.
+let txSupported = null;
+const noTxSupport = (err) => err?.code === 20 || err?.codeName === "IllegalOperation" || /Transaction numbers are only allowed|not supported.*transaction|replica set/i.test(err?.message ?? "");
+
+async function atomically(work, fallback) {
+  if (txSupported === false) return fallback();
+  const session = await mongoose.connection.startSession();
+  try {
+    let out;
+    await session.withTransaction(async () => { out = await work(session); });
+    txSupported = true;
+    return out;
+  } catch (err) {
+    if (txSupported !== true && noTxSupport(err)) { txSupported = false; return fallback(); }
+    throw err;
+  } finally {
+    await session.endSession().catch(() => {});
+  }
+}
+const isDuplicateKey = (err) => err?.code === 11000 || /E11000/.test(err?.message ?? "");
 
 /**
  * Credit coins. Idempotent per (type, userId, refId). `amount` defaults to
@@ -80,22 +114,35 @@ export async function credit(userId, type, { refId, note, amount } = {}) {
   const value = amount ?? rule?.amount;
   if (!value || value <= 0) throw new Error(`no amount for credit type: ${type}`);
   const key = keyFor(type, userId, refId);
-
-  const tx = {
+  const base = {
     _key: key, id: makeId("txn"), userId, type, amount: value,
     reason: note ?? rule?.label ?? type, refId: refId ?? null, createdAt: Date.now(),
   };
+  // Already applied → return the original row, flagged, so a caller can tell
+  // "paid just now" from "was paid before" without guessing.
+  const asDuplicate = async () => ({ ...strip(await coll(TX).findOne({ _key: key })), duplicate: true });
+
   try {
-    await coll(TX).insertOne(tx);
+    return await atomically(
+      async (session) => {
+        const row = { ...base };
+        await coll(TX).insertOne(row, { session });
+        const bal = await bumpBalance(userId, value, {}, session);
+        await coll(TX).updateOne({ _key: key }, { $set: { balanceAfter: bal?.balance ?? null } }, { session });
+        return { ...strip(row), balanceAfter: bal?.balance ?? null, duplicate: false };
+      },
+      async () => { // no transactions available: sequential (original behaviour)
+        const row = { ...base };
+        await coll(TX).insertOne(row);
+        const bal = await bumpBalance(userId, value);
+        await coll(TX).updateOne({ _key: key }, { $set: { balanceAfter: bal?.balance ?? null } });
+        return { ...strip(row), balanceAfter: bal?.balance ?? null, duplicate: false };
+      },
+    );
   } catch (err) {
-    // Already applied: return the original row, flagged, so a caller can tell
-    // "paid just now" from "was paid before" without guessing.
-    if (err?.code === 11000) return { ...strip(await coll(TX).findOne({ _key: key })), duplicate: true };
+    if (isDuplicateKey(err)) return asDuplicate();
     throw err;
   }
-  const bal = await bumpBalance(userId, value);
-  await coll(TX).updateOne({ _key: key }, { $set: { balanceAfter: bal?.balance ?? null } });
-  return { ...strip(tx), balanceAfter: bal?.balance ?? null, duplicate: false };
 }
 
 /**
@@ -108,36 +155,50 @@ export async function debit(userId, type, amount, { refId, note, allowNegative =
   if (!refId) throw new Error("debit requires a refId");
   if (!amount || amount <= 0) throw new Error("debit amount must be positive");
   const key = keyFor(type, userId, refId);
+  const asDuplicate = async () => ({ ...strip(await coll(TX).findOne({ _key: key })), duplicate: true });
 
-  const existing = await coll(TX).findOne({ _key: key });
-  if (existing) return strip(existing); // duplicate request — already debited
+  if (await coll(TX).findOne({ _key: key })) return asDuplicate(); // already debited — no Koins moved by THIS call
 
   const guard = allowNegative ? {} : { balance: { $gte: amount } };
-  if (!allowNegative) {
-    // Make sure a balance doc exists so the guarded update can match.
-    await coll(BAL).updateOne({ _key: userId }, { $setOnInsert: { userId, balance: 0, updatedAt: Date.now() } }, { upsert: true });
-  }
-  const bal = await bumpBalance(userId, -amount, guard);
-  if (!bal) {
-    const current = await coll(BAL).findOne({ _key: userId });
-    throw new InsufficientBalanceError(current?.balance ?? 0, amount);
-  }
+  const base = { _key: key, id: makeId("txn"), userId, type, amount: -amount, reason: note ?? type, refId, createdAt: Date.now() };
 
-  const tx = {
-    _key: key, id: makeId("txn"), userId, type, amount: -amount,
-    reason: note ?? type, refId, balanceAfter: bal.balance, createdAt: Date.now(),
-  };
   try {
-    await coll(TX).insertOne(tx);
+    return await atomically(
+      async (session) => {
+        // Claim the ledger key FIRST. A duplicate can then never reach the
+        // balance guard and be misreported as "insufficient".
+        const row = { ...base };
+        await coll(TX).insertOne(row, { session });
+        if (!allowNegative) await coll(BAL).updateOne({ _key: userId }, { $setOnInsert: { userId, balance: 0, updatedAt: Date.now() } }, { upsert: true, session });
+        const bal = await bumpBalance(userId, -amount, guard, session);
+        if (!bal) {
+          const current = await coll(BAL).findOne({ _key: userId }, { session });
+          throw new InsufficientBalanceError(current?.balance ?? 0, amount); // aborts: the row insert is rolled back too
+        }
+        await coll(TX).updateOne({ _key: key }, { $set: { balanceAfter: bal.balance } }, { session });
+        return { ...strip(row), balanceAfter: bal.balance, duplicate: false };
+      },
+      async () => { // no transactions available: sequential (original behaviour)
+        if (!allowNegative) await coll(BAL).updateOne({ _key: userId }, { $setOnInsert: { userId, balance: 0, updatedAt: Date.now() } }, { upsert: true });
+        const bal = await bumpBalance(userId, -amount, guard);
+        if (!bal) {
+          const current = await coll(BAL).findOne({ _key: userId });
+          throw new InsufficientBalanceError(current?.balance ?? 0, amount);
+        }
+        const row = { ...base, balanceAfter: bal.balance };
+        try {
+          await coll(TX).insertOne(row);
+        } catch (err) {
+          if (isDuplicateKey(err)) { await bumpBalance(userId, amount); return asDuplicate(); } // give this decrement back
+          throw err;
+        }
+        return { ...strip(row), duplicate: false };
+      },
+    );
   } catch (err) {
-    if (err?.code === 11000) {
-      // A concurrent identical request won the insert; give this decrement back.
-      await bumpBalance(userId, amount);
-      return strip(await coll(TX).findOne({ _key: key }));
-    }
+    if (isDuplicateKey(err)) return asDuplicate();
     throw err;
   }
-  return strip(tx);
 }
 
 export async function getBalance(userId) {

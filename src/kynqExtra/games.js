@@ -21,6 +21,7 @@ export const GAME_TYPES = [
 // rather than being simultaneous/free-for-all — signaling.js uses this to
 // seed the initial turnOf when a game starts.
 export const TURN_BASED_GAMES = ["tic-tac-toe", "truth-or-dare"];
+export const canSkip = (gameType) => typeof ENGINES[gameType]?.skip === "function";
 
 const WOULD_YOU_RATHER_PROMPTS = [
   { a: "travel back in time", b: "travel to the future" },
@@ -358,14 +359,44 @@ function guessWordMove(session, scopedId, move) {
   };
 }
 
+// ─── Skipping (Master Spec v3 §4: "Skipping a question is free") ───
+// A skip swaps in a fresh prompt. It never costs Koins, never scores, and
+// never refunds the game fee. Turn order is untouched. The engine decides who
+// may skip: anyone in simultaneous games; the player on the spot in the others.
+const differentFrom = (pick, current, same = (a, b) => a === b) => { let next = pick(); for (let i = 0; i < 6 && same(next, current); i += 1) next = pick(); return next; };
+const samePrompt = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+function wouldYouRatherSkip(session, scopedId) {
+  return { ok: true, state: { prompt: differentFrom(randomWouldYouRather, session.state.prompt, samePrompt), answers: {}, lastRound: { prompt: session.state.prompt, skippedBy: scopedId } }, turnOf: null, status: "active", winner: null };
+}
+function thisOrThatSkip(session, scopedId) {
+  return { ok: true, state: { prompt: differentFrom(randomThisOrThat, session.state.prompt, samePrompt), answers: {}, lastRound: { prompt: session.state.prompt, skippedBy: scopedId } }, turnOf: null, status: "active", winner: null };
+}
+function truthOrDareSkip(session, scopedId) {
+  const { turnPlayer, phase, choice, prompt } = session.state;
+  if (scopedId !== turnPlayer) return { ok: false, reason: "not your turn" };
+  if (phase !== "prompt") return { ok: false, reason: "nothing to skip yet" };
+  const list = choice === "truth" ? TRUTH_PROMPTS : DARE_PROMPTS;
+  const next = differentFrom(() => list[Math.floor(Math.random() * list.length)], prompt);
+  return { ok: true, state: { ...session.state, prompt: next, skipped: (session.state.skipped || 0) + 1 }, turnOf: turnPlayer, status: "active", winner: null };
+}
+function quickQuizSkip(session, scopedId) {
+  const next = differentFrom(randomQuizQuestion, { q: session.state.question }, (a, b) => a.q === b.q);
+  return { ok: true, state: { question: next.q, options: next.options, _correct: next.correct, answers: {}, score: session.state.score, round: session.state.round, lastRound: { question: session.state.question, options: session.state.options, skippedBy: scopedId } }, turnOf: null, status: "active", winner: null };
+}
+function guessWordSkip(session, scopedId) {
+  if (scopedId !== session.state.describerScopedId) return { ok: false, reason: "only the describer can skip the word" };
+  return { ok: true, state: { ...session.state, word: differentFrom(randomWord, session.state.word) }, turnOf: session.turnOf ?? null, status: "active", winner: null };
+}
+
 const ENGINES = {
   "tic-tac-toe": { initial: ticTacToeInitial, move: ticTacToeMove },
   "rock-paper-scissors": { initial: rpsInitial, move: rpsMove },
-  "would-you-rather": { initial: wouldYouRatherInitial, move: wouldYouRatherMove },
-  "this-or-that": { initial: thisOrThatInitial, move: thisOrThatMove },
-  "truth-or-dare": { initial: truthOrDareInitial, move: truthOrDareMove },
-  "quick-quiz": { initial: quickQuizInitial, move: quickQuizMove },
-  "guess-the-word": { initial: guessWordInitial, move: guessWordMove },
+  "would-you-rather": { initial: wouldYouRatherInitial, move: wouldYouRatherMove, skip: wouldYouRatherSkip },
+  "this-or-that": { initial: thisOrThatInitial, move: thisOrThatMove, skip: thisOrThatSkip },
+  "truth-or-dare": { initial: truthOrDareInitial, move: truthOrDareMove, skip: truthOrDareSkip },
+  "quick-quiz": { initial: quickQuizInitial, move: quickQuizMove, skip: quickQuizSkip },
+  "guess-the-word": { initial: guessWordInitial, move: guessWordMove, skip: guessWordSkip },
 };
 
 export function createInitialState(gameType, participantA, participantB) {
@@ -386,6 +417,7 @@ export function applyMove(gameType, session, scopedId, move) {
   if (session.turnOf != null && session.turnOf !== scopedId) {
     return { ok: false, reason: "not your turn" };
   }
+  if (move?.skip === true) return engine.skip ? engine.skip(session, scopedId) : { ok: false, reason: "this game has nothing to skip" };
   return engine.move(session, scopedId, move);
 }
 
