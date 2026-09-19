@@ -376,7 +376,11 @@ export function initSignaling(server) {
         const call = await getCall(callId);
         if (!call || call.status !== "active") throw new Error("call not active");
         const initialState = createInitialState(inv.gameType, call.participantA, call.participantB);
-        const firstTurn = TURN_BASED_GAMES.includes(inv.gameType) ? inv.from : null;
+        // MUST match the free-game path and the engines' own initial state, which
+        // both put participantA on turn. Using the starter here instead made
+        // session.turnOf and state.turnPlayer disagree, so NEITHER player could
+        // move — a deadlocked game the starter had already paid for.
+        const firstTurn = TURN_BASED_GAMES.includes(inv.gameType) ? call.participantA : null;
         session = await createGameSession(callId, inv.gameType, initialState, firstTurn);
       } catch (err) {
         io.to(callId).emit("game:invite:closed", { inviteId, reason: "failed" }); // nothing was charged
