@@ -12,7 +12,7 @@
 // reconcile races can never credit twice. The wallet is never written from
 // anything the client sends.
 import { collection, makeId } from "../gift/store.js";
-import { cashfreeConfigured, cashfreeMode, createCashfreeOrder, getCashfreeOrder } from "../gift/cashfree.js";
+import { cashfreeConfigured, cashfreeMode, createCashfreeOrder, getCashfreeOrder, demoPaymentsAllowed, PAYMENTS_UNAVAILABLE } from "../gift/cashfree.js";
 import { credit, debit } from "./wallet.js";
 
 const orders = collection("coin_orders");
@@ -53,6 +53,9 @@ export async function createCoinOrder({ user, packId, phone }) {
   const pack = COIN_PACKS.find((p) => p.id === packId);
   if (!pack) throw Object.assign(new Error("unknown pack"), { code: "BAD_PACK" });
 
+  // Fail closed BEFORE creating anything: no keys in production = no sale.
+  if (!cashfreeConfigured && !demoPaymentsAllowed) throw Object.assign(new Error(PAYMENTS_UNAVAILABLE), { code: "PAYMENTS_UNAVAILABLE" });
+
   const id = makeId("coin");
   const now = Date.now();
   let order = {
@@ -64,7 +67,7 @@ export async function createCoinOrder({ user, packId, phone }) {
   await orders.set(id, order);
 
   if (!cashfreeConfigured) {
-    // Demo mode — same behaviour as the physical checkout without keys.
+    // Demo mode (never in production — see demoPaymentsAllowed).
     order = await markCoinOrderPaid(id, "demo mode: no Cashfree keys configured");
     return { order, mode: "demo" };
   }

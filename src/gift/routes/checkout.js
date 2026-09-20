@@ -3,7 +3,7 @@ import { collection } from "../store.js";
 import { getScopedId, syncProfileFromCheckout } from "../session.js";
 import { computeTotals, createOrder, markOrderPaid, setOrderStatus, updateOrder } from "../orders-store.js";
 import { ok, created, badRequest, unauthorized, wrap } from "../http.js";
-import { cashfreeConfigured, cashfreeMode, createCashfreeOrder } from "../cashfree.js";
+import { cashfreeConfigured, cashfreeMode, createCashfreeOrder, demoPaymentsAllowed, PAYMENTS_UNAVAILABLE } from "../cashfree.js";
 import { sendOrderConfirmationEmail } from "../order-email.js";
 import { evaluateCoupon } from "../coupons.js";
 
@@ -19,6 +19,8 @@ const CLIENT_URL = process.env.CLIENT_URL || "https://kynq.in";
 router.post("/session", wrap(async (req, res) => {
   const b = req.body || {};
   if (!b.customer?.name || !b.customer?.email) return badRequest(res, "customer name + email required");
+  // Fail closed before an order exists: no keys in production = no sale.
+  if (!cashfreeConfigured && !demoPaymentsAllowed) return res.status(503).json({ error: "payments_unavailable", message: PAYMENTS_UNAVAILABLE });
   if (cashfreeConfigured && !b.customer?.phone) return badRequest(res, "customer phone required");
 
   const { scopedId, userId } = await getScopedId(req, res);

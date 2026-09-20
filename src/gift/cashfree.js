@@ -15,6 +15,14 @@ const ENV = process.env.CASHFREE_ENV === "production" ? "production" : "sandbox"
 const API_VERSION = process.env.CASHFREE_API_VERSION || "2025-01-01";
 
 export const cashfreeConfigured = !!(APP_ID && SECRET_KEY);
+// Without keys, orders are marked paid with no payment ("demo mode") — useful
+// on a laptop, a free-money hole anywhere real. So demo mode exists ONLY
+// outside production; in production a missing/mistyped key must fail closed.
+export const demoPaymentsAllowed = !cashfreeConfigured && process.env.NODE_ENV !== "production";
+export const PAYMENTS_UNAVAILABLE = "Payments aren't set up yet. Please try again later.";
+if (!cashfreeConfigured && process.env.NODE_ENV === "production") {
+  console.error("[cashfree] CASHFREE_APP_ID / CASHFREE_SECRET_KEY are not set — every purchase will be refused until they are.");
+}
 export const cashfreeMode = ENV; // passed to the frontend JS SDK's Cashfree({ mode })
 
 const BASE_URL = ENV === "production" ? "https://api.cashfree.com/pg" : "https://sandbox.cashfree.com/pg";

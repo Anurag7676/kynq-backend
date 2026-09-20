@@ -246,6 +246,7 @@ router.post("/coins/orders", wrap(async (req, res) => {
     created(res, result);
   } catch (err) {
     if (err.code === "BAD_PACK") return badRequest(res, "unknown pack");
+    if (err.code === "PAYMENTS_UNAVAILABLE") return res.status(503).json({ error: "payments_unavailable", message: err.message });
     console.error("[coins] order creation failed:", err.message, err.cause?.cashfree);
     badRequest(res, err.message);
   }
