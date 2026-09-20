@@ -28,6 +28,7 @@ export const EARN_RULES = {
   chat_minutes: { amount: ECONOMY.chat.rewardPerBlock, label: `every ${ECONOMY.chat.blockSeconds / 60} minutes of chat` },
   first_chat: { amount: ECONOMY.chat.firstChatBonus, label: `first ${ECONOMY.chat.blockSeconds / 60} minutes of chat (one time)` },
   referral: { amount: ECONOMY.referral.reward, label: `a friend you invited chats for ${ECONOMY.chat.blockSeconds / 60} minutes` },
+  game_win: { amount: ECONOMY.games.win.reward, label: `win a game — up to ${ECONOMY.games.win.maxRewardedPerDay} a day, once per person` },
 };
 
 export class InsufficientBalanceError extends Error {

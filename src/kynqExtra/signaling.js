@@ -21,6 +21,7 @@ import { debit, credit, getBalance, InsufficientBalanceError } from "./wallet.js
 import { ECONOMY, gamePrice } from "./economy.js";
 import { getExtraProfile } from "./profile.js";
 import { activePassExpiry } from "./gender-pass.js";
+import { rewardGameWin } from "./game-rewards.js";
 import { startMeter, markConnected, pauseMeter, endMeter, onReward, ensureChatMeterIndexes } from "./chat-meter.js";
 
 // scopedId -> Set<socketId>, so REST routes (friend requests, DMs) can push
@@ -312,9 +313,17 @@ export function initSignaling(server) {
           winner: result.winner ?? null,
         });
 
-        // Winning no longer pays Koins (Master Spec v3 §2: "No +5 Koins
-        // game-win reward in the MVP") — it only feeds the public pulse.
-        if (result.winner) recordGameWin(session.gameType, socket.data.city);
+        if (result.winner) {
+          recordGameWin(session.gameType, socket.data.city);
+          // Winner's Koins (capped, once per opponent per day — see
+          // game-rewards.js). After the state broadcast, so the board and the
+          // win screen never wait on the wallet.
+          const call = await getCall(callId);
+          const loser = call ? (call.participantA === result.winner ? call.participantB : call.participantA) : null;
+          const reward = await rewardGameWin(result.winner, loser, session.gameType);
+          emitToUser(result.winner, "game:reward", { gameId, ...reward });
+          if (reward.paid) emitToUser(result.winner, "wallet:updated", { earned: reward.paid, reason: "game_win" });
+        }
         ack?.({ ok: true });
       } catch (err) {
         ack?.({ ok: false, reason: err.message });

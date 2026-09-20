@@ -28,6 +28,10 @@ export const ECONOMY = {
   },
 
   games: {
+    // Winning pays; playing doesn't. DECIDED by the product owner 2026-09-21
+    // (reverses v3's "no game-win reward"). Anti-farming limits live in
+    // game-rewards.js: once per opponent per day, and this daily cap.
+    win: { reward: 5, maxRewardedPerDay: 5 },
     // CONFIRMED by the product owner (2026-09-20). The spec's list was cut
     // off after the first two; these prices were proposed and then approved.
     // 0 = free (starts instantly, no invitation). >0 = paid: the starter pays,
