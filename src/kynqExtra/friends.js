@@ -122,6 +122,11 @@ export async function dropOnBlock(a, b) {
   if (req) await requests.delete(key);
 }
 
+/** How many friends — no per-friend DM lookups (listFriends does those). */
+export async function countFriends(me) {
+  return (await friendships.find((f) => f.a === me || f.b === me)).length;
+}
+
 export async function listFriends(me) {
   const all = await friendships.find((f) => f.a === me || f.b === me);
   const out = [];

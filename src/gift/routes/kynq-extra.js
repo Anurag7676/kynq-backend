@@ -25,6 +25,7 @@ import {
   getQuestionOptions, askQuestion, answerQuestion, answerDayGame, shareMoment,
 } from "../../kynqExtra/challenges.js";
 import { auth } from "../../middleware/authMiddleware.js";
+import { activitySummary } from "../../kynqExtra/activity.js";
 
 const router = express.Router();
 
@@ -102,6 +103,14 @@ router.get("/gifs", wrap(async (req, res) => {
   } catch (err) {
     badRequest(res, err.message);
   }
+}));
+
+// GET /api/kynq-extra/activity?days=7|30|90 — the account dashboard's numbers.
+router.get("/activity", wrap(async (req, res) => {
+  const { userId } = await getScopedId(req, res);
+  if (!userId) return unauthorized(res, "sign in to use kynq extra");
+  const days = [7, 30, 90].includes(Number(req.query.days)) ? Number(req.query.days) : 30;
+  ok(res, await activitySummary(userId, days));
 }));
 
 // GET /api/kynq-extra/wallet — balance + recent transaction history.
