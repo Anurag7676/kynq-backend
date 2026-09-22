@@ -16,6 +16,7 @@ import { startMeter } from "./chat-meter.js";
 import { debit, credit, InsufficientBalanceError } from "./wallet.js";
 import { ECONOMY } from "./economy.js";
 import { activePassExpiry, startPass, cancelPass } from "./gender-pass.js";
+import { DEMO_MATCH_ENABLED, DEMO_FALLBACK_MS, pickDemoMatch } from "./demo-accounts.js";
 
 const TICK_MS = 1000;
 
@@ -140,7 +141,21 @@ export async function runMatchTick(io) {
     );
     // eslint-disable-next-line no-await-in-loop
     const match = await findMatchFor(entry, candidates);
-    if (!match) continue;
+    if (!match) {
+      // Staging-only: nobody real is available yet — offer a clearly-labelled
+      // demo account instead of leaving the tester staring at an empty queue.
+      // See demo-accounts.js — inert unless explicitly enabled there.
+      if (DEMO_MATCH_ENABLED && Date.now() - entry.joinedAt >= DEMO_FALLBACK_MS) {
+        // eslint-disable-next-line no-await-in-loop
+        const demo = await pickDemoMatch().catch((err) => { console.error("[kynqExtra] demo match failed:", err); return null; });
+        if (demo) {
+          matchedThisTick.add(entry.scopedId);
+          queue.delete(entry.scopedId);
+          io.to(entry.socketId).emit("match:demo", demo);
+        }
+      }
+      continue;
+    }
 
     // Paid preference: charge now, before anything is committed.
     let charge = { failed: null, paid: [] };
