@@ -151,6 +151,7 @@ export async function runMatchTick(io) {
         if (demo) {
           matchedThisTick.add(entry.scopedId);
           queue.delete(entry.scopedId);
+          console.log(`[kynqExtra] match:demo  scopedId=${entry.scopedId} demoId=${demo.id} waitedMs=${Date.now() - entry.joinedAt}`);
           io.to(entry.socketId).emit("match:demo", demo);
         }
       }
@@ -206,6 +207,7 @@ export async function runMatchTick(io) {
     if (socketB) { socketB.data.currentCallId = call.id; socketB.data.peerScopedId = entry.scopedId; }
 
     recordMatch(entry.location?.city, match.location?.city);
+    console.log(`[kynqExtra] match:found  callId=${call.id} a=${entry.scopedId} b=${match.scopedId} waitedMsA=${Date.now() - entry.joinedAt} waitedMsB=${Date.now() - match.joinedAt} queueDepth=${queue.size}`);
     io.to(entry.socketId).emit("match:found", { callId: call.id, peerScopedId: match.scopedId, initiator: true });
     io.to(match.socketId).emit("match:found", { callId: call.id, peerScopedId: entry.scopedId, initiator: false });
   }

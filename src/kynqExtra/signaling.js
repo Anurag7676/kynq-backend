@@ -83,6 +83,7 @@ async function leaveActiveCall(io, socket, reason) {
   await endMeter(callId); // bank the eligible chat time before the call closes
   closeInvite(io, callId, null); // an unanswered game invitation dies with the call (it cost nothing)
   await endCall(callId, reason).catch((err) => console.error("[kynqExtra] endCall failed:", err));
+  console.log(`[kynqExtra] call:ended  callId=${callId} reason=${reason}`);
   socket.to(callId).emit("call:ended", { reason });
   clearCallState(io, callId);
 }
@@ -102,6 +103,7 @@ function scheduleGraceEnd(io, scopedId, callId, peerScopedId) {
     await endMeter(callId);
     closeInvite(io, callId, null);
     await endCall(callId, "peer_disconnected").catch((err) => console.error("[kynqExtra] endCall failed:", err));
+    console.log(`[kynqExtra] call:ended  callId=${callId} reason=peer_disconnected (grace expired) scopedId=${scopedId}`);
     io.to(callId).emit("call:ended", { reason: "peer_disconnected" });
     clearCallState(io, callId);
   }, RECONNECT_GRACE_MS);
@@ -162,13 +164,14 @@ export function initSignaling(server) {
   io.use(async (socket, next) => {
     try {
       const identity = await resolveSocketIdentity(socket.handshake);
-      if (!identity) return next(new Error("no session — load kynq.in first"));
-      if (!identity.isAuthenticated) return next(new Error("sign in to use kynq extra"));
-      if (await isRestricted(identity.userId)) return next(new Error("account restricted"));
+      if (!identity) { console.log(`[kynqExtra] auth rejected — no session, socket=${socket.id}`); return next(new Error("no session — load kynq.in first")); }
+      if (!identity.isAuthenticated) { console.log(`[kynqExtra] auth rejected — not signed in, socket=${socket.id}`); return next(new Error("sign in to use kynq extra")); }
+      if (await isRestricted(identity.userId)) { console.log(`[kynqExtra] auth rejected — restricted account, userId=${identity.userId}`); return next(new Error("account restricted")); }
       socket.data.scopedId = identity.scopedId;
       socket.data.userId = identity.userId;
       next();
     } catch (err) {
+      console.log(`[kynqExtra] auth error — socket=${socket.id}: ${err.message}`);
       next(new Error("auth failed"));
     }
   });
@@ -177,6 +180,7 @@ export function initSignaling(server) {
     const { scopedId } = socket.data;
     if (!userSockets.has(scopedId)) userSockets.set(scopedId, new Set());
     userSockets.get(scopedId).add(socket.id);
+    console.log(`[kynqExtra] connected  scopedId=${scopedId} socket=${socket.id} totalSockets=${io.engine.clientsCount}`);
     tryResumeCall(io, socket);
 
     socket.on("queue:join", async (payload = {}, ack) => {
@@ -206,6 +210,7 @@ export function initSignaling(server) {
           gender: myProfile?.gender ?? null,
           genderPref: wanted,
         });
+        console.log(`[kynqExtra] queue:join  scopedId=${scopedId} city=${socket.data.city ?? "-"} scope=${payload.locationScope ?? "worldwide"} topics=${(payload.topics ?? []).join(",") || "-"} queueDepth=${matchmaker.queueDepth()}`);
         ack?.({ ok: true });
       } catch (err) {
         ack?.({ ok: false, reason: err.message });
@@ -214,6 +219,7 @@ export function initSignaling(server) {
 
     socket.on("queue:leave", (payload, ack) => {
       matchmaker.leaveQueue(scopedId);
+      console.log(`[kynqExtra] queue:leave  scopedId=${scopedId} queueDepth=${matchmaker.queueDepth()}`);
       ack?.({ ok: true });
     });
 
@@ -476,12 +482,13 @@ export function initSignaling(server) {
       }
     });
 
-    socket.on("disconnect", () => {
+    socket.on("disconnect", (reason) => {
       const set = userSockets.get(scopedId);
       if (set) { set.delete(socket.id); if (!set.size) userSockets.delete(scopedId); }
       matchmaker.leaveQueue(scopedId);
       const callId = socket.data.currentCallId;
       const peerScopedId = socket.data.peerScopedId;
+      console.log(`[kynqExtra] disconnected  scopedId=${scopedId} socket=${socket.id} reason=${reason} inCall=${!!callId} totalSockets=${io.engine.clientsCount}`);
       if (!callId) return;
 
       // Grace period, not an instant hangup — a dropped wifi connection or
