@@ -8,8 +8,8 @@
 // match + not blocked + not recently matched. The resulting call is
 // persisted (calls-store.js survives process restarts); the live queue
 // itself does not need to.
-import { isBlockedEitherWay } from "./blocks.js";
-import { createCall, wasRecentlyMatched } from "./calls-store.js";
+import { blockedPairsAmong, pairKey } from "./blocks.js";
+import { createCall, recentlyMatchedPairsAmong } from "./calls-store.js";
 import { recordMatch } from "./pulse.js";
 import crypto from "crypto";
 import { startMeter } from "./chat-meter.js";
@@ -106,17 +106,22 @@ function topicOverlapScore(a, b) {
   return overlap;
 }
 
-async function findMatchFor(entry, candidates) {
+// Synchronous — blockedPairs/recentPairs are pre-fetched ONCE per tick
+// (see runMatchTick) instead of 2 DB round-trips per candidate pair, which
+// was O(n²) round-trips/tick and the actual scaling bottleneck at more than
+// a few dozen concurrent seekers. With those as plain Sets, this whole scan
+// is pure in-memory work — a 1000-deep queue is ~1M cheap comparisons,
+// comfortably under the 1s tick budget.
+function findMatchFor(entry, candidates, blockedPairs, recentPairs) {
   let best = null;
   let bestScore = -1;
   for (const candidate of candidates) {
     if (candidate.scopedId === entry.scopedId) continue;
     if (!locationCompatible(entry, candidate)) continue;
     if (!genderCompatible(entry, candidate)) continue;
-    // eslint-disable-next-line no-await-in-loop
-    if (await isBlockedEitherWay(entry.scopedId, candidate.scopedId)) continue;
-    // eslint-disable-next-line no-await-in-loop
-    if (await wasRecentlyMatched(entry.scopedId, candidate.scopedId)) continue;
+    const key = pairKey(entry.scopedId, candidate.scopedId);
+    if (blockedPairs.has(key)) continue;
+    if (recentPairs.has(key)) continue;
 
     const score = topicOverlapScore(entry, candidate);
     if (score > bestScore) {
@@ -133,14 +138,21 @@ export async function runMatchTick(io) {
   const waiting = [...queue.values()].sort((a, b) => a.joinedAt - b.joinedAt);
   const matchedThisTick = new Set();
 
+  // ONE pair of queries for the whole tick, not per candidate pair — see
+  // blockedPairsAmong/recentlyMatchedPairsAmong for why this matters at scale.
+  const waitingIds = waiting.map((e) => e.scopedId);
+  const [blockedPairs, recentPairs] = await Promise.all([
+    blockedPairsAmong(waitingIds),
+    recentlyMatchedPairsAmong(waitingIds),
+  ]);
+
   for (const entry of waiting) {
     if (matchedThisTick.has(entry.scopedId) || !queue.has(entry.scopedId)) continue;
 
     const candidates = waiting.filter(
       (c) => !matchedThisTick.has(c.scopedId) && queue.has(c.scopedId) && c.scopedId !== entry.scopedId
     );
-    // eslint-disable-next-line no-await-in-loop
-    const match = await findMatchFor(entry, candidates);
+    const match = findMatchFor(entry, candidates, blockedPairs, recentPairs);
     if (!match) {
       // Staging-only: nobody real is available yet — offer a clearly-labelled
       // demo account instead of leaving the tester staring at an empty queue.

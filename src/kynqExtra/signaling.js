@@ -24,6 +24,8 @@ import { activePassExpiry } from "./gender-pass.js";
 import { rewardGameWin } from "./game-rewards.js";
 import { startMeter, markConnected, pauseMeter, endMeter, onReward, ensureChatMeterIndexes } from "./chat-meter.js";
 import { ensureDemoAccountIndexes } from "./demo-accounts.js";
+import { ensureBlockIndexes } from "./blocks.js";
+import { ensureCallsIndexes } from "./calls-store.js";
 
 // scopedId -> Set<socketId>, so REST routes (friend requests, DMs) can push
 // realtime events to a user wherever they are in the app.
@@ -161,6 +163,8 @@ export function initSignaling(server) {
   ioRef = io;
   ensureChatMeterIndexes().catch(() => {}); // warm-up only; writes await it themselves
   ensureDemoAccountIndexes().catch(() => {});
+  ensureBlockIndexes().catch(() => {});
+  ensureCallsIndexes().catch(() => {});
   onReward((userId, payload) => emitToUser(userId, "wallet:updated", payload));
 
   io.use(async (socket, next) => {
