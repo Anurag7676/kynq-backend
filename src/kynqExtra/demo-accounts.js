@@ -22,7 +22,22 @@ import { collection } from "../gift/store.js";
 // not by demo user id — with far fewer clips than demo users, tracking by
 // user id alone would still repeat the same clip under a different name.
 // The actual requirement is "no repeat clip," so that's what's tracked.
-const seenStore = collection("kynq_extra_demo_seen");
+const SEEN_COLLECTION = "kynq_extra_demo_seen";
+const seenStore = collection(SEEN_COLLECTION);
+
+// Same pattern as wallet.js/chat-meter.js/gifts.js — a `_key`-indexed lookup
+// collection needs its index created once, or every get()/set() falls back
+// to a full collection scan once this has more than a handful of docs (one
+// doc per real tester who's ever hit the demo fallback).
+let indexesReady = null;
+export function ensureDemoAccountIndexes() {
+  if (!indexesReady) {
+    indexesReady = mongoose.connection.collection(SEEN_COLLECTION)
+      .createIndex({ _key: 1 }, { unique: true })
+      .catch((err) => { indexesReady = null; throw err; });
+  }
+  return indexesReady;
+}
 
 const requested = process.env.DEMO_MATCH_ACCOUNTS === "true";
 export const DEMO_MATCH_ENABLED = requested && process.env.NODE_ENV !== "production";
