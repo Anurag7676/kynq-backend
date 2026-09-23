@@ -18,7 +18,10 @@ import { collection } from "../gift/store.js";
 
 // Persisted (not in-memory) — a real seeker's "already seen" list must
 // survive a server restart/redeploy, same as everything else here. Keyed by
-// the seeker's own scopedId; { seen: [demoUserId, ...] }.
+// the seeker's own scopedId; { seen: [videoKey, ...] }. Tracked by VIDEO,
+// not by demo user id — with far fewer clips than demo users, tracking by
+// user id alone would still repeat the same clip under a different name.
+// The actual requirement is "no repeat clip," so that's what's tracked.
 const seenStore = collection("kynq_extra_demo_seen");
 
 const requested = process.env.DEMO_MATCH_ACCOUNTS === "true";
@@ -80,17 +83,14 @@ const rand = (arr) => arr[Math.floor(Math.random() * arr.length)];
  * S3 yet, or no demo users seeded yet). Safe to call unconditionally; a null
  * return is simply a no-op for the caller.
  *
- * `seekerScopedId` picks WHICH demo identity: a seeker never gets the same
- * demo account twice in a row — the pool of not-yet-seen demo users shrinks
- * each time, and only resets (everyone becomes eligible again) once they've
- * genuinely gone through all of them. Persisted per-seeker in Mongo, so it
+ * `seekerScopedId` drives the no-repeat rule — THE major requirement here:
+ * a seeker must never see the same CLIP twice in a row. Picking is done by
+ * clip first (from whichever clips this seeker hasn't seen yet), then a
+ * demo identity assigned to that clip (scripts/assign-demo-videos.mjs
+ * assigns each demo user a fixed clip — several users can share one clip
+ * since there are far fewer clips than demo users). Once a seeker has been
+ * shown every clip, the cycle resets. Persisted per-seeker in Mongo, so it
  * survives restarts, not just one process's lifetime.
- *
- * Each demo identity always shows the SAME clip (its `demoVideoKey`,
- * assigned once by scripts/assign-demo-videos.mjs — round-robinned, since
- * there are usually fewer clips than demo users) rather than a different
- * random one every time it's picked. A demo user seeded before that script
- * ran falls back to a random clip so nothing breaks in the meantime.
  */
 export async function pickDemoMatch(seekerScopedId) {
   if (!DEMO_MATCH_ENABLED) return null;
@@ -99,17 +99,21 @@ export async function pickDemoMatch(seekerScopedId) {
 
   const seenDoc = seekerScopedId ? await seenStore.get(seekerScopedId).catch(() => null) : null;
   const seen = new Set(seenDoc?.seen ?? []);
-  let pool = users.filter((u) => !seen.has(u.id));
-  if (!pool.length) { pool = users; seen.clear(); } // exhausted the whole roster — start a fresh cycle
+  let unseenKeys = keys.filter((k) => !seen.has(k));
+  if (!unseenKeys.length) { unseenKeys = keys; seen.clear(); } // shown every clip — start a fresh cycle
 
-  const user = rand(pool);
-  const key = keys.includes(user.demoVideoKey) ? user.demoVideoKey : rand(keys);
+  const key = rand(unseenKeys);
+  // Prefer a demo identity actually assigned to this clip; fall back to any
+  // identity if none are (e.g. assign-demo-videos.mjs hasn't run yet).
+  const candidates = users.filter((u) => u.demoVideoKey === key);
+  const user = rand(candidates.length ? candidates : users);
+
   const videoUrl = await getSignedUrl(s3(), new GetObjectCommand({ Bucket: BUCKET, Key: key }), { expiresIn: PRESIGN_TTL_S })
     .catch((err) => { console.error("[kynqExtra] couldn't sign a demo video URL:", err.message); return null; });
   if (!videoUrl) return null;
 
   if (seekerScopedId) {
-    seen.add(user.id);
+    seen.add(key);
     await seenStore.set(seekerScopedId, { seen: [...seen], updatedAt: Date.now() }).catch((err) => {
       console.error("[kynqExtra] couldn't persist demo-seen state:", err.message);
     });
