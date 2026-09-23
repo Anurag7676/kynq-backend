@@ -147,7 +147,7 @@ export async function runMatchTick(io) {
       // See demo-accounts.js — inert unless explicitly enabled there.
       if (DEMO_MATCH_ENABLED && Date.now() - entry.joinedAt >= DEMO_FALLBACK_MS) {
         // eslint-disable-next-line no-await-in-loop
-        const demo = await pickDemoMatch().catch((err) => { console.error("[kynqExtra] demo match failed:", err); return null; });
+        const demo = await pickDemoMatch(entry.scopedId).catch((err) => { console.error("[kynqExtra] demo match failed:", err); return null; });
         if (demo) {
           matchedThisTick.add(entry.scopedId);
           queue.delete(entry.scopedId);

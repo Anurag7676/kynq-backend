@@ -14,6 +14,12 @@
 import mongoose from "mongoose";
 import { S3Client, ListObjectsV2Command, GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { collection } from "../gift/store.js";
+
+// Persisted (not in-memory) — a real seeker's "already seen" list must
+// survive a server restart/redeploy, same as everything else here. Keyed by
+// the seeker's own scopedId; { seen: [demoUserId, ...] }.
+const seenStore = collection("kynq_extra_demo_seen");
 
 const requested = process.env.DEMO_MATCH_ACCOUNTS === "true";
 export const DEMO_MATCH_ENABLED = requested && process.env.NODE_ENV !== "production";
@@ -24,7 +30,7 @@ if (requested && process.env.NODE_ENV === "production") {
 
 // How long a real searcher waits before being offered a demo match — long
 // enough that two real testers online at once still match each other first.
-export const DEMO_FALLBACK_MS = Number(process.env.DEMO_MATCH_FALLBACK_MS) || 4000;
+export const DEMO_FALLBACK_MS = 120_000; // 2 minutes
 
 const BUCKET = process.env.DEMO_VIDEO_BUCKET || "kynq-extra-media";
 const PREFIX = process.env.DEMO_VIDEO_PREFIX || "videos/";
@@ -60,7 +66,7 @@ let usersCachedAt = 0;
 async function demoIdentities() {
   if (cachedUsers.length && Date.now() - usersCachedAt < CACHE_TTL_MS) return cachedUsers;
   cachedUsers = await mongoose.connection.collection("users")
-    .find({ isDemoSeed: true }).project({ id: 1, name: 1, city: 1 }).toArray()
+    .find({ isDemoSeed: true }).project({ id: 1, name: 1, city: 1, demoVideoKey: 1 }).toArray()
     .catch((err) => { console.error("[kynqExtra] couldn't load seeded demo users:", err.message); return []; });
   usersCachedAt = Date.now();
   return cachedUsers;
@@ -69,19 +75,45 @@ async function demoIdentities() {
 const rand = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
 /**
- * A random seeded identity + a random S3 clip's presigned URL — or null if
+ * A seeded identity + its assigned S3 clip's presigned URL — or null if
  * anything needed isn't ready (flag off, no AWS creds, nothing uploaded to
  * S3 yet, or no demo users seeded yet). Safe to call unconditionally; a null
  * return is simply a no-op for the caller.
+ *
+ * `seekerScopedId` picks WHICH demo identity: a seeker never gets the same
+ * demo account twice in a row — the pool of not-yet-seen demo users shrinks
+ * each time, and only resets (everyone becomes eligible again) once they've
+ * genuinely gone through all of them. Persisted per-seeker in Mongo, so it
+ * survives restarts, not just one process's lifetime.
+ *
+ * Each demo identity always shows the SAME clip (its `demoVideoKey`,
+ * assigned once by scripts/assign-demo-videos.mjs — round-robinned, since
+ * there are usually fewer clips than demo users) rather than a different
+ * random one every time it's picked. A demo user seeded before that script
+ * ran falls back to a random clip so nothing breaks in the meantime.
  */
-export async function pickDemoMatch() {
+export async function pickDemoMatch(seekerScopedId) {
   if (!DEMO_MATCH_ENABLED) return null;
   const [keys, users] = await Promise.all([videoKeys(), demoIdentities()]);
   if (!keys.length || !users.length) return null;
-  const user = rand(users);
-  const key = rand(keys);
+
+  const seenDoc = seekerScopedId ? await seenStore.get(seekerScopedId).catch(() => null) : null;
+  const seen = new Set(seenDoc?.seen ?? []);
+  let pool = users.filter((u) => !seen.has(u.id));
+  if (!pool.length) { pool = users; seen.clear(); } // exhausted the whole roster — start a fresh cycle
+
+  const user = rand(pool);
+  const key = keys.includes(user.demoVideoKey) ? user.demoVideoKey : rand(keys);
   const videoUrl = await getSignedUrl(s3(), new GetObjectCommand({ Bucket: BUCKET, Key: key }), { expiresIn: PRESIGN_TTL_S })
     .catch((err) => { console.error("[kynqExtra] couldn't sign a demo video URL:", err.message); return null; });
   if (!videoUrl) return null;
+
+  if (seekerScopedId) {
+    seen.add(user.id);
+    await seenStore.set(seekerScopedId, { seen: [...seen], updatedAt: Date.now() }).catch((err) => {
+      console.error("[kynqExtra] couldn't persist demo-seen state:", err.message);
+    });
+  }
+
   return { id: user.id, name: user.name, city: user.city ?? null, videoUrl };
 }
