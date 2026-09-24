@@ -39,6 +39,11 @@ const queue = new Map();
 let tickHandle = null;
 
 export function joinQueue({ scopedId, socketId, topics, locationScope, location, gender, genderPref }) {
+  // A repeat join (the client can join from the home page AND from the room for one
+  // click, or re-join after a reconnect) must NOT restart the person's wait: every
+  // wait-based rule (widening, rematch after 45s, the demo fallback) is measured from
+  // the FIRST join. Only the preferences and the socket are refreshed.
+  const joinedAt = queue.get(scopedId)?.joinedAt ?? Date.now();
   queue.set(scopedId, {
     scopedId,
     socketId,
@@ -47,8 +52,14 @@ export function joinQueue({ scopedId, socketId, topics, locationScope, location,
     location: LOCATION_FILTER_ENABLED ? (location ?? {}) : {}, // { city, state, country } — best-effort, from client/IP
     gender: gender ?? null,         // from the saved profile (server-side)
     genderPref: genderPref ?? null, // paid extra; null = anyone
-    joinedAt: Date.now(),
+    joinedAt,
   });
+}
+
+/** How long (ms) this person has been waiting, or null if they are not queued. */
+export function waitedMs(scopedId) {
+  const e = queue.get(scopedId);
+  return e ? Date.now() - e.joinedAt : null;
 }
 
 export function leaveQueue(scopedId) {
