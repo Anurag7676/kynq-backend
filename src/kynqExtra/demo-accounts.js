@@ -48,7 +48,35 @@ if (requested && process.env.NODE_ENV === "production") {
 
 // How long a real searcher waits before being offered a demo match — long
 // enough that two real testers online at once still match each other first.
-export const DEMO_FALLBACK_MS = 120_000; // 2 minutes
+//
+// The wait GROWS each time the same person is handed a demo, so someone with nobody
+// around isn't shown clip after clip: 30s for the first, then 1 min, 3 min, and 5 min
+// from the fourth on. A real match resets it to 30s, and so does 30 minutes away.
+// Kept in memory (it's staging-only soft state; a restart just starts everyone at 30s).
+export const DEMO_DELAY_STEPS_MS = [30_000, 60_000, 180_000, 300_000];
+export const DEMO_FALLBACK_MS = DEMO_DELAY_STEPS_MS[0]; // the first wait
+const DEMO_BACKOFF_RESET_MS = 30 * 60_000;
+const demoBackoff = new Map(); // scopedId -> { count, lastAt }
+
+/** How long this person waits before being offered a demo, given how many they've had. */
+export function demoDelayMs(scopedId, now = Date.now()) {
+  const s = demoBackoff.get(scopedId);
+  if (!s) return DEMO_DELAY_STEPS_MS[0];
+  if (now - s.lastAt > DEMO_BACKOFF_RESET_MS) { demoBackoff.delete(scopedId); return DEMO_DELAY_STEPS_MS[0]; }
+  return DEMO_DELAY_STEPS_MS[Math.min(s.count, DEMO_DELAY_STEPS_MS.length - 1)];
+}
+
+/** They were just handed a demo: the next wait is one step longer. Returns that next wait. */
+export function noteDemoServed(scopedId, now = Date.now()) {
+  if (demoBackoff.size > 1000) for (const [id, s] of demoBackoff) if (now - s.lastAt > DEMO_BACKOFF_RESET_MS) demoBackoff.delete(id);
+  const prev = demoBackoff.get(scopedId);
+  const count = prev && now - prev.lastAt <= DEMO_BACKOFF_RESET_MS ? prev.count + 1 : 1;
+  demoBackoff.set(scopedId, { count, lastAt: now });
+  return demoDelayMs(scopedId, now);
+}
+
+/** They got a real match: start again from the shortest wait. */
+export function resetDemoBackoff(scopedId) { demoBackoff.delete(scopedId); }
 
 const BUCKET = process.env.DEMO_VIDEO_BUCKET || "kynq-extra-media";
 const PREFIX = process.env.DEMO_VIDEO_PREFIX || "videos/";
