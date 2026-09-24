@@ -192,9 +192,13 @@ export function initSignaling(server) {
     socket.on("queue:join", async (payload = {}, ack) => {
       try {
         if (!(await isAgeGateCleared(socket.data.userId))) {
+          console.log(`[kynqExtra] queue:join REJECTED scopedId=${scopedId} reason=age check not completed`);
           return ack?.({ ok: false, reason: "complete the age check first" });
         }
-        if (socket.data.currentCallId) return ack?.({ ok: false, reason: "already in a call" });
+        if (socket.data.currentCallId) {
+          console.log(`[kynqExtra] queue:join REJECTED scopedId=${scopedId} reason=already in a call (callId=${socket.data.currentCallId})`);
+          return ack?.({ ok: false, reason: "already in a call" });
+        }
 
         socket.data.city = typeof payload.location?.city === "string" ? payload.location.city.slice(0, 40) : null;
         // Gender preference (Master Spec v3 §5) is a paid extra. The seeker's
@@ -204,7 +208,10 @@ export function initSignaling(server) {
         if (isPaidGenderPreference(wanted) && !(await activePassExpiry(scopedId))) { // a live pass already covers it
           const price = ECONOMY.genderPreference.price;
           const balance = await getBalance(scopedId);
-          if (balance < price) return ack?.({ ok: false, reason: "not enough Koins for a gender preference", code: "insufficient", balance, price });
+          if (balance < price) {
+            console.log(`[kynqExtra] queue:join REJECTED scopedId=${scopedId} reason=not enough Koins (${balance} < ${price})`);
+            return ack?.({ ok: false, reason: "not enough Koins for a gender preference", code: "insufficient", balance, price });
+          }
         }
         const myProfile = await getExtraProfile(socket.data.userId).catch(() => null);
 
@@ -220,6 +227,7 @@ export function initSignaling(server) {
         console.log(`[kynqExtra] queue:join  scopedId=${scopedId} city=${socket.data.city ?? "-"} scope=${payload.locationScope ?? "worldwide"} topics=${(payload.topics ?? []).join(",") || "-"} queueDepth=${matchmaker.queueDepth()}`);
         ack?.({ ok: true });
       } catch (err) {
+        console.log(`[kynqExtra] queue:join ERROR scopedId=${scopedId} ${err.message}`);
         ack?.({ ok: false, reason: err.message });
       }
     });
