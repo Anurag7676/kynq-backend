@@ -199,7 +199,8 @@ export function initSignaling(server) {
         socket.data.city = typeof payload.location?.city === "string" ? payload.location.city.slice(0, 40) : null;
         // Gender preference (Master Spec v3 §5) is a paid extra. The seeker's
         // OWN gender always comes from their saved profile, never the payload.
-        const wanted = ["male", "female", "other"].includes(payload.genderPreference) ? payload.genderPreference : null;
+        // "Other" is no longer offered as a match preference; a stale saved one just means "anyone".
+        const wanted = ["male", "female"].includes(payload.genderPreference) ? payload.genderPreference : null;
         if (isPaidGenderPreference(wanted) && !(await activePassExpiry(scopedId))) { // a live pass already covers it
           const price = ECONOMY.genderPreference.price;
           const balance = await getBalance(scopedId);
