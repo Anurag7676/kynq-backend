@@ -14,7 +14,7 @@ import { recordMatch } from "./pulse.js";
 import crypto from "crypto";
 import { startMeter } from "./chat-meter.js";
 import { debit, credit, InsufficientBalanceError } from "./wallet.js";
-import { ECONOMY } from "./economy.js";
+import { ECONOMY, isPaidGenderPreference } from "./economy.js";
 import { activePassExpiry, startPass, cancelPass } from "./gender-pass.js";
 import { DEMO_MATCH_ENABLED, DEMO_FALLBACK_MS, pickDemoMatch } from "./demo-accounts.js";
 
@@ -29,7 +29,7 @@ export function joinQueue({ scopedId, socketId, topics, locationScope, location,
     scopedId,
     socketId,
     topics: topics ?? [],
-    locationScope: locationScope ?? "worldwide",
+    locationScope: normScope(locationScope ?? "worldwide"),
     location: location ?? {}, // { city, state, country } — best-effort, from client/IP
     gender: gender ?? null,         // from the saved profile (server-side)
     genderPref: genderPref ?? null, // paid extra; null = anyone
@@ -49,14 +49,16 @@ export function queueDepth() {
   return queue.size;
 }
 
+const normScope = (s) => (s === "same-city" ? "same-state" : s);
+
 function locationCompatible(a, b) {
   if (a.locationScope === "worldwide" || b.locationScope === "worldwide") return true;
   // Both must agree on the scope AND the corresponding location field to
   // avoid a same-city seeker being matched against a same-country seeker
   // who happens to share a country but not a city.
-  const scope = a.locationScope === b.locationScope ? a.locationScope : null;
+  const scope = normScope(a.locationScope) === normScope(b.locationScope) ? normScope(a.locationScope) : null;
   if (!scope) return false;
-  if (scope === "same-city") return !!a.location.city && a.location.city === b.location.city;
+  // Same-city is no longer offered; normScope() maps legacy values to same-state.
   if (scope === "same-state") return !!a.location.state && a.location.state === b.location.state;
   if (scope === "same-country") return !!a.location.country && a.location.country === b.location.country;
   return false;
@@ -83,7 +85,7 @@ async function chargePreferences(a, b) {
   const chargeId = crypto.randomUUID();
   const paid = [];
   for (const e of [a, b]) {
-    if (!e.genderPref) continue;
+    if (!isPaidGenderPreference(e.genderPref)) continue; // free preference: no debit, no pass
     // A live 5-minute pass covers this match — nothing to charge.
     // eslint-disable-next-line no-await-in-loop
     if (await activePassExpiry(e.scopedId)) continue;
@@ -172,7 +174,7 @@ export async function runMatchTick(io) {
 
     // Paid preference: charge now, before anything is committed.
     let charge = { failed: null, paid: [] };
-    if (entry.genderPref || match.genderPref) {
+    if (isPaidGenderPreference(entry.genderPref) || isPaidGenderPreference(match.genderPref)) {
       // eslint-disable-next-line no-await-in-loop
       charge = await chargePreferences(entry, match).catch((err) => { console.error("[kynqExtra] preference charge failed:", err); return { failed: "error", paid: [] }; });
       if (charge.failed) {

@@ -70,6 +70,7 @@ export const INDIAN_CITIES = [
   { city: "Kochi", state: "Kerala" }, { city: "Mysore", state: "Karnataka" },
   { city: "Noida", state: "Uttar Pradesh" }, { city: "Gurugram", state: "Haryana" },
 ];
+export const INDIAN_STATES = [...new Set(INDIAN_CITIES.map((c) => c.state))].sort();
 const CITY_BY_NAME = new Map(INDIAN_CITIES.map((c) => [c.city, c]));
 
 export async function getExtraProfile(userId) {
@@ -91,7 +92,7 @@ export async function getExtraProfile(userId) {
 // Set once at Kynq Extra onboarding. dob is immutable after the first
 // successful set — resubmitting a different DOB to game the age gate is
 // rejected, not silently overwritten.
-export async function setExtraProfile(userId, { dob, interests, locationScope, city, bio, gender }) {
+export async function setExtraProfile(userId, { dob, interests, locationScope, city, state, bio, gender }) {
   const user = await findUserById(userId);
   if (!user) throw new Error("user not found");
 
@@ -117,6 +118,11 @@ export async function setExtraProfile(userId, { dob, interests, locationScope, c
     if (!match) throw new Error("unsupported city — pick one from the list");
     patch.city = match.city;
     patch.state = match.state;
+  } else if (state) {
+    // State-only selection (the UI offers states, not cities).
+    if (!INDIAN_STATES.includes(state)) throw new Error("unsupported state — pick one from the list");
+    patch.state = state;
+    patch.city = null;
   }
   if (bio != null) patch.bio = String(bio).slice(0, 200);
   if (gender !== undefined) {

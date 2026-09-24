@@ -346,7 +346,7 @@ router.get("/economy", wrap(async (req, res) => {
     chat: { minutesPerReward: ECONOMY.chat.blockSeconds / 60, rewardPerBlock: ECONOMY.chat.rewardPerBlock, firstChatBonus: ECONOMY.chat.firstChatBonus },
     referral: { reward: ECONOMY.referral.reward },
     games,
-    genderPreference: { price: ECONOMY.genderPreference.price, passMinutes: ECONOMY.genderPreference.passMs / 60000 },
+    genderPreference: { price: ECONOMY.genderPreference.price, passMinutes: ECONOMY.genderPreference.passMs / 60000, paidPreferences: ECONOMY.genderPreference.paidPreferences },
     filters: filterCatalog(),
   });
 }));

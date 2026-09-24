@@ -57,6 +57,9 @@ export const ECONOMY = {
     // window are free. See gender-pass.js.
     price: 10,
     passMs: 5 * 60 * 1000,
+    // Only these preferences are charged. Male / Other / Anyone are free:
+    // never debited, never need a pass, never refunded.
+    paidPreferences: ["female"],
   },
 
   filters: {
@@ -70,3 +73,8 @@ export const ECONOMY = {
 
 export const gamePrice = (gameType) => ECONOMY.games.prices[gameType] ?? 0;
 export const isPremiumLens = (lensId) => ECONOMY.filters.premiumLenses.includes(lensId);
+
+// True when a gender preference value costs Koins (currently only "female").
+export function isPaidGenderPreference(pref) {
+  return !!pref && ECONOMY.genderPreference.paidPreferences.includes(pref);
+}

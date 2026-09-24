@@ -18,7 +18,7 @@ import { attachPulse, recordGift, recordGameWin } from "./pulse.js";
 import { dropOnBlock } from "./friends.js";
 import crypto from "crypto";
 import { debit, credit, getBalance, InsufficientBalanceError } from "./wallet.js";
-import { ECONOMY, gamePrice } from "./economy.js";
+import { ECONOMY, gamePrice, isPaidGenderPreference } from "./economy.js";
 import { getExtraProfile } from "./profile.js";
 import { activePassExpiry } from "./gender-pass.js";
 import { rewardGameWin } from "./game-rewards.js";
@@ -200,7 +200,7 @@ export function initSignaling(server) {
         // Gender preference (Master Spec v3 §5) is a paid extra. The seeker's
         // OWN gender always comes from their saved profile, never the payload.
         const wanted = ["male", "female", "other"].includes(payload.genderPreference) ? payload.genderPreference : null;
-        if (wanted && !(await activePassExpiry(scopedId))) { // a live pass already covers it
+        if (isPaidGenderPreference(wanted) && !(await activePassExpiry(scopedId))) { // a live pass already covers it
           const price = ECONOMY.genderPreference.price;
           const balance = await getBalance(scopedId);
           if (balance < price) return ack?.({ ok: false, reason: "not enough Koins for a gender preference", code: "insufficient", balance, price });
