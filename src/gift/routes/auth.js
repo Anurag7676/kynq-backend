@@ -31,19 +31,12 @@ function safeNext(raw) {
   return raw;
 }
 
-// POST /api/auth/request-otp — email a 6-digit sign-in code (logged in dev)
-router.post("/request-otp", otpLimiter, wrap(async (req, res) => {
-  const email = req.body?.email;
-  const name = req.body?.name;
-  if (!email || !/.+@.+\..+/.test(email)) return badRequest(res, "valid email required");
-  if (name) await getOrCreateUser(email, name);
-
-  const result = await requestOtp(email);
-  if (!result.ok && result.reason === "cooldown") {
-    return tooMany(res, "a code was just sent — wait a moment before requesting another.", { retryAfterMs: result.retryAfterMs });
-  }
-  ok(res, { ok: true, message: "if that email exists, a code is on its way." });
-}));
+// Email-code sign-in is switched off: Google is the only way in. The routes
+// stay (returning 410) so an old client gets a clear message instead of a 404.
+// otp.js is untouched, so turning this back on is a small revert.
+const emailCodesOff = (req, res) =>
+  res.status(410).json({ success: false, error: "email_sign_in_disabled", message: "Email codes are turned off. Please continue with Google." });
+router.post("/request-otp", otpLimiter, emailCodesOff);
 
 // ─── Sign in with Google (Master Spec v3 §8) ───
 // Enabled purely by configuration: set GOOGLE_CLIENT_ID (an OAuth "Web
@@ -89,25 +82,7 @@ router.post("/google", otpLimiter, wrap(async (req, res) => {
   ok(res, { ok: true, user, next });
 }));
 
-// POST /api/auth/verify-otp — verify the code, sign in, fold in the guest cart
-router.post("/verify-otp", otpLimiter, wrap(async (req, res) => {
-  const email = req.body?.email;
-  const code = req.body?.code;
-  const next = safeNext(req.body?.next);
-  if (!email || !code) return badRequest(res, "email and code required");
-
-  const result = await verifyOtp(email, code);
-  if (!result.ok) return badRequest(res, otpErrorMessage(result.reason), { reason: result.reason });
-
-  const user = await getOrCreateUser(email);
-  // Fold the guest's cart/wishlist/orders into the account before the
-  // anonymous session cookie stops being consulted (getScopedId() switches
-  // to user.id the moment kynq_auth is set below).
-  const { sessionId: anonSessionId } = getOrCreateSession(req, res);
-  await mergeAnonymousIntoUser(anonSessionId, user.id);
-  await signIn(res, user.id);
-  ok(res, { ok: true, user, next });
-}));
+router.post("/verify-otp", otpLimiter, emailCodesOff); // see above
 
 function otpErrorMessage(reason) {
   switch (reason) {
