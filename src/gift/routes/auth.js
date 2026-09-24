@@ -55,27 +55,45 @@ router.get("/google/config", wrap(async (req, res) => {
 router.post("/google", otpLimiter, wrap(async (req, res) => {
   const clientId = process.env.GOOGLE_CLIENT_ID;
   if (!clientId) return res.status(503).json({ success: false, message: "Google sign-in isn't set up yet." });
-  const credential = req.body?.credential;
+  const credential = req.body?.credential;   // ID token (the rendered "Continue with Google" button)
+  const accessToken = req.body?.accessToken; // access token (the direct Google popup on Start matching)
   const next = safeNext(req.body?.next);
-  if (!credential || typeof credential !== "string") return badRequest(res, "missing Google credential");
+  const hasCredential = typeof credential === "string" && credential;
+  const hasAccessToken = typeof accessToken === "string" && accessToken;
+  if (!hasCredential && !hasAccessToken) return badRequest(res, "missing Google credential");
 
-  // Google verifies the ID token's signature and expiry for us. We must still
-  // check it was issued FOR THIS APP (aud) — otherwise a token minted for any
-  // other site's Google login would sign people in here.
-  let t;
+  // Either way Google verifies the token's signature/expiry for us. We must
+  // still check it was issued FOR THIS APP (aud) — otherwise a token minted for
+  // any other site's Google login would sign people in here.
+  let email, name, emailVerified;
   try {
-    const r = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(credential)}`);
-    if (!r.ok) return unauthorized(res, "Google couldn't verify that sign-in. Please try again.");
-    t = await r.json();
+    if (hasCredential) {
+      const r = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(credential)}`);
+      if (!r.ok) return unauthorized(res, "Google couldn't verify that sign-in. Please try again.");
+      const t = await r.json();
+      const issuerOk = t.iss === "accounts.google.com" || t.iss === "https://accounts.google.com";
+      if (t.aud !== clientId || !issuerOk) return unauthorized(res, "That sign-in wasn't issued for kynq.");
+      if (Number(t.exp) * 1000 <= Date.now()) return unauthorized(res, "That sign-in has expired. Please try again.");
+      ({ email, name } = t); emailVerified = String(t.email_verified) === "true";
+    } else {
+      const r = await fetch(`https://oauth2.googleapis.com/tokeninfo?access_token=${encodeURIComponent(accessToken)}`);
+      if (!r.ok) return unauthorized(res, "Google couldn't verify that sign-in. Please try again.");
+      const t = await r.json();
+      if (t.aud !== clientId && t.azp !== clientId) return unauthorized(res, "That sign-in wasn't issued for kynq.");
+      if (Number(t.expires_in) <= 0) return unauthorized(res, "That sign-in has expired. Please try again.");
+      email = t.email; emailVerified = String(t.email_verified) === "true";
+      // tokeninfo doesn't carry the display name; ask userinfo (best effort).
+      try {
+        const u = await fetch("https://openidconnect.googleapis.com/v1/userinfo", { headers: { Authorization: `Bearer ${accessToken}` } });
+        if (u.ok) { const ui = await u.json(); name = ui.name; email = email || ui.email; if (ui.email_verified !== undefined) emailVerified = ui.email_verified === true || ui.email_verified === "true"; }
+      } catch { /* name is optional */ }
+    }
   } catch {
     return res.status(502).json({ success: false, message: "Couldn't reach Google. Please try again." });
   }
-  const issuerOk = t.iss === "accounts.google.com" || t.iss === "https://accounts.google.com";
-  if (t.aud !== clientId || !issuerOk) return unauthorized(res, "That sign-in wasn't issued for kynq.");
-  if (!t.email || String(t.email_verified) !== "true") return unauthorized(res, "That Google account's email isn't verified.");
-  if (Number(t.exp) * 1000 <= Date.now()) return unauthorized(res, "That sign-in has expired. Please try again.");
+  if (!email || !emailVerified) return unauthorized(res, "That Google account's email isn't verified.");
 
-  const user = await getOrCreateUser(t.email, t.name);
+  const user = await getOrCreateUser(email, name);
   const { sessionId: anonSessionId } = getOrCreateSession(req, res);
   await mergeAnonymousIntoUser(anonSessionId, user.id);
   await signIn(res, user.id);
