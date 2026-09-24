@@ -50,12 +50,12 @@ export const ECONOMY = {
   },
 
   genderPreference: {
-    // DECIDED by the product owner (2026-09-20): "10 Koins per 5 MIN" is a
+    // DECIDED by the product owner (2026-09-20): "N Koins per 5 MIN" is a
     // 5-MINUTE PASS. Charged at the first successful preference match (spec:
     // "deducted only when the matching preference successfully results in a
     // match"), runs 5 minutes from then; further preference matches inside the
     // window are free. See gender-pass.js.
-    price: 10,
+    price: 100, // raised from 10 on 2026-09-24 (product owner)
     passMs: 5 * 60 * 1000,
     // Only these preferences are charged. Male / Other / Anyone are free:
     // never debited, never need a pass, never refunded.
