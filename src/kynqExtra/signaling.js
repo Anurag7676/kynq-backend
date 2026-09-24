@@ -23,7 +23,7 @@ import { getExtraProfile } from "./profile.js";
 import { activePassExpiry } from "./gender-pass.js";
 import { rewardGameWin } from "./game-rewards.js";
 import { startMeter, markConnected, pauseMeter, endMeter, onReward, ensureChatMeterIndexes } from "./chat-meter.js";
-import { ensureDemoAccountIndexes } from "./demo-accounts.js";
+import { ensureDemoAccountIndexes, warmDemoBackoff, DEMO_MATCH_ENABLED } from "./demo-accounts.js";
 import { ensureBlockIndexes } from "./blocks.js";
 import { ensureCallsIndexes } from "./calls-store.js";
 
@@ -214,6 +214,10 @@ export function initSignaling(server) {
           }
         }
         const myProfile = await getExtraProfile(socket.data.userId).catch(() => null);
+
+        // Demo-enabled servers only: load this person's saved demo-wait state (one indexed read)
+        // BEFORE they enter the queue, so the matcher's per-second checks never touch the database.
+        if (DEMO_MATCH_ENABLED) await warmDemoBackoff(scopedId);
 
         matchmaker.joinQueue({
           scopedId,
