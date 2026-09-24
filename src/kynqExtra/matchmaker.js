@@ -58,17 +58,42 @@ export function queueDepth() {
 
 const normScope = (s) => (s === "same-city" ? "same-state" : s);
 
-function locationCompatible(a, b) {
-  if (a.locationScope === "worldwide" || b.locationScope === "worldwide") return true;
-  // Both must agree on the scope AND the corresponding location field to
-  // avoid a same-city seeker being matched against a same-country seeker
-  // who happens to share a country but not a city.
-  const scope = normScope(a.locationScope) === normScope(b.locationScope) ? normScope(a.locationScope) : null;
-  if (!scope) return false;
-  // Same-city is no longer offered; normScope() maps legacy values to same-state.
-  if (scope === "same-state") return !!a.location.state && a.location.state === b.location.state;
-  if (scope === "same-country") return !!a.location.country && a.location.country === b.location.country;
+// How long a narrow search waits before it widens. With a small pool, "my state"
+// or "India" can strand someone for minutes even though people are searching, so
+// a search relaxes one step at a time: my state -> India -> worldwide.
+const WIDEN_TO_COUNTRY_MS = 30_000;
+const WIDEN_TO_WORLD_MS = 60_000;
+
+function effectiveScope(entry, now) {
+  const scope = normScope(entry.locationScope);
+  const waited = now - entry.joinedAt;
+  if (scope === "worldwide") return scope;
+  if (waited >= WIDEN_TO_WORLD_MS) return "worldwide";
+  if (scope === "same-state" && waited >= WIDEN_TO_COUNTRY_MS) return "same-country";
+  return scope;
+}
+
+// Does `other` satisfy what `owner` asked for? Each person's choice is a rule
+// about the OTHER person, so two people match only if both are satisfied. If the
+// other person's location isn't known (e.g. they chose worldwide and never set
+// one) we give the benefit of the doubt rather than refuse: kynq is India-only,
+// and refusing would strand people for something we can't check.
+function satisfies(owner, other, scope) {
+  if (scope === "worldwide") return true;
+  if (scope === "same-country") {
+    const mine = owner.location.country || "India", theirs = other.location.country || "India";
+    return mine === theirs;
+  }
+  if (scope === "same-state") {
+    if (!owner.location.state) return false;        // asked for "my state" but has none saved
+    if (!other.location.state) return true;          // unknown: benefit of the doubt
+    return owner.location.state === other.location.state;
+  }
   return false;
+}
+
+export function locationCompatible(a, b, now = Date.now()) {
+  return satisfies(a, b, effectiveScope(a, now)) && satisfies(b, a, effectiveScope(b, now));
 }
 
 // Gender preference (Master Spec v3 §5). HONESTY NOTE: gender is self-declared
@@ -127,7 +152,7 @@ export function findMatchFor(entry, candidates, blockedPairs, recentPairs) {
   const now = Date.now();
   for (const candidate of candidates) {
     if (candidate.scopedId === entry.scopedId) continue;
-    if (!locationCompatible(entry, candidate)) continue;
+    if (!locationCompatible(entry, candidate, now)) continue;
     if (!genderCompatible(entry, candidate)) continue;
     const key = pairKey(entry.scopedId, candidate.scopedId);
     if (blockedPairs.has(key)) continue;
