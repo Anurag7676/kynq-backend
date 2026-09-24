@@ -176,6 +176,32 @@ export function findMatchFor(entry, candidates, blockedPairs, recentPairs) {
   return best;
 }
 
+// Why two people who are both waiting did NOT pair. Logged (rarely) when people
+// have been stuck for a while, so "7 online but nobody connects" can be answered
+// from the server log instead of guessed at.
+let lastExplainAt = 0;
+function explainStuck(waiting, blockedPairs, recentPairs, now) {
+  if (waiting.length < 2 || now - lastExplainAt < 20_000) return;
+  if (!waiting.some((e) => now - e.joinedAt >= 20_000)) return;
+  lastExplainAt = now;
+  const short = (id) => id.slice(-6);
+  const lines = [];
+  const list = waiting.slice(0, 8);
+  for (let i = 0; i < list.length; i += 1) {
+    for (let j = i + 1; j < list.length; j += 1) {
+      const a = list[i], b = list[j];
+      const key = pairKey(a.scopedId, b.scopedId);
+      let why = "compatible (should pair next tick)";
+      if (blockedPairs.has(key)) why = "blocked";
+      else if (!locationCompatible(a, b, now)) why = `location (${a.locationScope} vs ${b.locationScope})`;
+      else if (!genderCompatible(a, b)) why = `gender preference (${a.genderPref ?? "any"} vs ${b.genderPref ?? "any"})`;
+      else if (recentPairs.has(key) && !(now - a.joinedAt >= RECENT_RELAX_MS && now - b.joinedAt >= RECENT_RELAX_MS)) why = "met recently (rematch after both wait 45s)";
+      lines.push(`${short(a.scopedId)}<->${short(b.scopedId)}: ${why}`);
+    }
+  }
+  console.log(`[kynqExtra] stuck queue (${waiting.length} waiting, longest ${Math.round((now - waiting[0].joinedAt) / 1000)}s): ${lines.join(" | ")}`);
+}
+
 // Exported for tests / manual triggering; the running server calls this on
 // a timer via startMatchmaker().
 export async function runMatchTick(io) {
@@ -267,6 +293,8 @@ export async function runMatchTick(io) {
     io.to(entry.socketId).emit("match:found", { callId: call.id, peerScopedId: match.scopedId, initiator: true });
     io.to(match.socketId).emit("match:found", { callId: call.id, peerScopedId: entry.scopedId, initiator: false });
   }
+
+  explainStuck([...queue.values()].sort((a, b) => a.joinedAt - b.joinedAt), blockedPairs, recentPairs, Date.now());
 }
 
 export function startMatchmaker(io) {
