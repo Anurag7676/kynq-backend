@@ -24,15 +24,30 @@ const staticConfigured = !!(STATIC_TURN_URLS.length > 0 && STATIC_TURN_USERNAME 
 
 export const turnConfigured = coturnConfigured || staticConfigured;
 
+// A bare "turn:host:port" URL is UDP-only in browsers. Some mobile networks
+// block UDP, so offer TCP too (coturn listens on both), and add the same host
+// as a STUN server. ICE tries every route and keeps the one that works, so
+// this costs nothing when UDP is fine.
+function expandUrls(urls) {
+  const out = [];
+  for (const u of urls) {
+    if (/^turns?:/i.test(u) && !u.includes("?")) { out.push(`${u}?transport=udp`, `${u}?transport=tcp`); }
+    else out.push(u);
+  }
+  const first = urls.find((u) => /^turn:/i.test(u));
+  if (first) out.push(first.replace(/^turn:/i, "stun:").replace(/\?.*$/, ""));
+  return [...new Set(out)];
+}
+
 export function mintTurnCredentials(scopedId) {
   if (coturnConfigured) {
     const timestamp = Math.floor(Date.now() / 1000) + CREDENTIAL_TTL_S;
     const username = `${timestamp}:${scopedId}`;
     const password = crypto.createHmac("sha1", TURN_SECRET).update(username).digest("base64");
-    return { username, password, ttl: CREDENTIAL_TTL_S, urls: TURN_URLS };
+    return { username, password, ttl: CREDENTIAL_TTL_S, urls: expandUrls(TURN_URLS) };
   }
   if (staticConfigured) {
-    return { username: STATIC_TURN_USERNAME, password: STATIC_TURN_PASSWORD, ttl: CREDENTIAL_TTL_S, urls: STATIC_TURN_URLS };
+    return { username: STATIC_TURN_USERNAME, password: STATIC_TURN_PASSWORD, ttl: CREDENTIAL_TTL_S, urls: expandUrls(STATIC_TURN_URLS) };
   }
   return null;
 }
