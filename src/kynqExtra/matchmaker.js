@@ -20,6 +20,13 @@ import { DEMO_MATCH_ENABLED, DEMO_FALLBACK_MS, pickDemoMatch } from "./demo-acco
 
 const TICK_MS = 1000;
 
+// A pair that just talked is normally not matched again (see calls-store's
+// 30-minute window), so people meet someone new. But with a small pool that
+// would leave everyone stuck: if BOTH people have already waited this long and
+// the only option left is a recent partner, let them meet again. Fresh
+// partners are always preferred, and blocked pairs are never relaxed.
+const RECENT_RELAX_MS = 45_000;
+
 // scopedId -> { scopedId, socketId, topics, locationScope, location, joinedAt }
 const queue = new Map();
 let tickHandle = null;
@@ -114,18 +121,21 @@ function topicOverlapScore(a, b) {
 // a few dozen concurrent seekers. With those as plain Sets, this whole scan
 // is pure in-memory work — a 1000-deep queue is ~1M cheap comparisons,
 // comfortably under the 1s tick budget.
-function findMatchFor(entry, candidates, blockedPairs, recentPairs) {
+export function findMatchFor(entry, candidates, blockedPairs, recentPairs) {
   let best = null;
-  let bestScore = -1;
+  let bestScore = -Infinity;
+  const now = Date.now();
   for (const candidate of candidates) {
     if (candidate.scopedId === entry.scopedId) continue;
     if (!locationCompatible(entry, candidate)) continue;
     if (!genderCompatible(entry, candidate)) continue;
     const key = pairKey(entry.scopedId, candidate.scopedId);
     if (blockedPairs.has(key)) continue;
-    if (recentPairs.has(key)) continue;
+    const recent = recentPairs.has(key);
+    if (recent && !(now - entry.joinedAt >= RECENT_RELAX_MS && now - candidate.joinedAt >= RECENT_RELAX_MS)) continue;
 
-    const score = topicOverlapScore(entry, candidate);
+    // A recent partner only wins if nobody fresh is available.
+    const score = topicOverlapScore(entry, candidate) - (recent ? 1000 : 0);
     if (score > bestScore) {
       best = candidate;
       bestScore = score;
