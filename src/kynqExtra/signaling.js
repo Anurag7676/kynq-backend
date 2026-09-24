@@ -245,6 +245,13 @@ export function initSignaling(server) {
       socket.to(callId).emit("webrtc:signal", { type, payload, from: scopedId });
     });
 
+    // ─── Media state relay — lets each person see when the other's mic or camera is off.
+    // Just two booleans forwarded to the other person in the call; nothing is stored.
+    socket.on("media:state", ({ callId, mic, cam } = {}) => {
+      if (!callId || callId !== socket.data.currentCallId) return;
+      socket.to(callId).emit("media:state", { mic: mic !== false, cam: cam !== false });
+    });
+
     // ─── Chat — persisted, with delivery/read receipts and reactions ───
     socket.on("chat:message", async ({ callId, text, gifUrl } = {}, ack) => {
       if (!callId || callId !== socket.data.currentCallId) return ack?.({ ok: false });
