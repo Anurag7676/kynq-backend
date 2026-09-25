@@ -67,7 +67,7 @@ export const ECONOMY = {
     unlockMs: 24 * 60 * 60 * 1000,      // "unlocked for 24 hours from purchase"
     // CONFIRMED by the product owner (2026-09-20): every lens is premium
     // except Heart shades and Halo. Colour filters and Beauty stay free.
-    premiumLenses: ["puppy", "kitty", "bunny", "crown", "flowers", "butterflies", "blush"],
+    premiumLenses: ["puppy", "kitty", "bunny", "crown", "flowers", "butterflies", "blush", "devil", "robot", "vampire", "bighead"],
   },
 };
 
