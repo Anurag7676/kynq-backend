@@ -27,6 +27,13 @@ const TICK_MS = 1000;
 // switch in lib/features.ts.
 export const LOCATION_FILTER_ENABLED = false;
 
+// Topics are switched off for matching too. They only ever gave a preference for someone
+// with the same interest, but with few people online every search should draw on everyone,
+// so the server ignores whatever topics the client sends (old tabs included) and every
+// search is treated as "all topics". The picker in the app still saves the choice. Set true
+// to bring the same-interest preference back.
+export const TOPIC_MATCHING_ENABLED = false;
+
 // A pair that just talked is normally not matched again (see calls-store's
 // 30-minute window), so people meet someone new. But with a small pool that
 // would leave everyone stuck: if BOTH people have already waited this long and
@@ -47,7 +54,7 @@ export function joinQueue({ scopedId, socketId, topics, locationScope, location,
   queue.set(scopedId, {
     scopedId,
     socketId,
-    topics: topics ?? [],
+    topics: TOPIC_MATCHING_ENABLED ? (topics ?? []) : [],
     locationScope: LOCATION_FILTER_ENABLED ? normScope(locationScope ?? "worldwide") : "worldwide",
     location: LOCATION_FILTER_ENABLED ? (location ?? {}) : {}, // { city, state, country } — best-effort, from client/IP
     gender: gender ?? null,         // from the saved profile (server-side)
