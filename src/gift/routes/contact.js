@@ -6,10 +6,28 @@ import { sendEmail } from "../../config/emailConfig.js";
 const router = express.Router();
 const messages = collection("contact-messages");
 
+// Each accepted message emails the team, so a script could flood the inbox. Two cheap guards:
+// a hidden "website" field that real people never fill in, and at most a handful of messages
+// per address per hour (in memory: it resets on restart, which is fine for this purpose).
+const WINDOW_MS = 60 * 60 * 1000;
+const MAX_PER_WINDOW = 5;
+const hits = new Map();
+function tooMany(ip) {
+  const now = Date.now();
+  const recent = (hits.get(ip) || []).filter((t) => now - t < WINDOW_MS);
+  if (recent.length >= MAX_PER_WINDOW) { hits.set(ip, recent); return true; }
+  recent.push(now);
+  hits.set(ip, recent);
+  if (hits.size > 5000) for (const [k, v] of hits) if (!v.some((t) => now - t < WINDOW_MS)) hits.delete(k);
+  return false;
+}
+
 // POST /api/contact
 router.post("/", wrap(async (req, res) => {
   const b = req.body || {};
+  if (b.website) return created(res, { ok: true }); // trap field filled in: pretend success, save and send nothing
   if (!b.email || !b.message) return badRequest(res, "email and message are required");
+  if (tooMany(req.ip || "unknown")) return res.status(429).json({ message: "Too many messages from this connection. Please try again later, or email hi@kynq.in." });
   const record = {
     id: makeId("msg"),
     name: b.name ? String(b.name).slice(0, 80) : null,
