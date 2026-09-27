@@ -73,9 +73,11 @@ router.get("/users/:id/public", wrap(async (req, res) => {
 }));
 
 router.get("/profile", wrap(async (req, res) => {
-  const { userId } = await getScopedId(req, res);
-  if (!userId) return unauthorized(res, "sign in to use kynq extra");
-  const profile = await getExtraProfile(userId);
+  // Fetches the user once (getCurrentUser) and reuses it in getExtraProfile, instead of the
+  // old getScopedId + getExtraProfile(userId) pair, which looked the same user up twice.
+  const user = await getCurrentUser(req);
+  if (!user) return unauthorized(res, "sign in to use kynq extra");
+  const profile = await getExtraProfile(user.id, user);
   ok(res, { profile });
 }));
 

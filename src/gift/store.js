@@ -41,6 +41,14 @@ export function collection(name) {
       const docs = await coll(name).find({}).toArray();
       return docs.map(strip).filter(predicate);
     },
+    // A real, indexed query — for looking a document up by a field OTHER than `_key`
+    // (e.g. `id`) without pulling the whole collection into memory to filter in JS.
+    // The field being queried needs its own index (see ensureConsoleIndexes-style
+    // setup) or this degrades to the same full scan `find()` above does.
+    async findOne(query) {
+      const doc = await coll(name).findOne(query);
+      return strip(doc);
+    },
     async count() {
       return coll(name).countDocuments();
     },

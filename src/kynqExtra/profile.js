@@ -73,8 +73,10 @@ export const INDIAN_CITIES = [
 export const INDIAN_STATES = [...new Set(INDIAN_CITIES.map((c) => c.state))].sort();
 const CITY_BY_NAME = new Map(INDIAN_CITIES.map((c) => [c.city, c]));
 
-export async function getExtraProfile(userId) {
-  const user = await findUserById(userId);
+// `preloadedUser`: skip the lookup when the caller already has the user doc (e.g. the GET
+// /profile route, which fetches it once via getCurrentUser and would otherwise fetch it again).
+export async function getExtraProfile(userId, preloadedUser) {
+  const user = preloadedUser ?? await findUserById(userId);
   if (!user) return null;
   return {
     dob: user.dob ?? null,

@@ -34,8 +34,10 @@ export function getOrCreateSession(req, res) {
 
 // ─── Users ─────────────────────────────────────────────────
 export async function findUserById(id) {
-  const all = await users.list();
-  return all.find((u) => u.id === id) ?? null;
+  // Was `users.list()` + a JS .find() — pulled EVERY user document over the wire on every call
+  // (1280 users / ~500KB / ~5.4s measured directly against prod) just to find one by id, even
+  // though `users` already has an index on `id`. This is the actual query that index is for.
+  return users.findOne({ id });
 }
 export async function getOrCreateUser(email, name) {
   const key = email.toLowerCase().trim();
