@@ -1,6 +1,6 @@
 import express from "express";
 import { getScopedId, getOrCreateSession } from "../session.js";
-import { ok, created, badRequest, unauthorized, forbidden, wrap } from "../http.js";
+import { ok, okCacheable, created, badRequest, unauthorized, forbidden, wrap } from "../http.js";
 import { getExtraProfile, setExtraProfile, getPublicName, INTEREST_TOPICS, LOCATION_SCOPES, INDIAN_CITIES } from "../../kynqExtra/profile.js";
 import { mintTurnCredentials, turnConfigured } from "../../kynqExtra/turnCredentials.js";
 import { listOpenReports, reviewReport, setRestricted } from "../../kynqExtra/reports.js";
@@ -38,13 +38,13 @@ function requireAdmin(req, res, next) {
 // frontend renders as pickers, kept server-side as the single source of
 // truth (matches what the matchmaker actually scores against).
 router.get("/topics", wrap(async (req, res) => {
-  ok(res, { topics: INTEREST_TOPICS, locationScopes: LOCATION_SCOPES });
+  okCacheable(res, { topics: INTEREST_TOPICS, locationScopes: LOCATION_SCOPES });
 }));
 
 // GET /api/kynq-extra/cities — the fixed Indian-city list city/state
 // pickers render, server-side source of truth (see profile.js).
 router.get("/cities", wrap(async (req, res) => {
-  ok(res, { cities: INDIAN_CITIES });
+  okCacheable(res, { cities: INDIAN_CITIES });
 }));
 
 // GET /api/kynq-extra/prompt-categories — for the Prompts picker.

@@ -9,6 +9,14 @@ function send(res, status, body) {
 }
 
 export const ok = (res, body) => send(res, 200, body);
+// For a GET whose body is the same for everyone (no user data, no auth check on the response) and
+// changes rarely, e.g. a hardcoded topics/cities list: cache it at the edge and in the browser
+// instead of forcing a fresh round trip on every page load. `ok()` stays no-store by default since
+// most responses ARE per-user; this is opt-in per route.
+export const okCacheable = (res, body, maxAgeS = 3600) => {
+  res.set("Cache-Control", `public, max-age=${maxAgeS}, stale-while-revalidate=${maxAgeS * 24}`);
+  return res.status(200).json(body);
+};
 export const created = (res, body) => send(res, 201, body);
 export const noContent = (res) => send(res, 204, null);
 export const badRequest = (res, message, details) =>
