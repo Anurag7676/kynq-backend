@@ -50,9 +50,12 @@ import giftCart from "./gift/routes/cart.js";
 import giftWishlist from "./gift/routes/wishlist.js";
 import giftAuth from "./gift/routes/auth.js";
 import giftContact from "./gift/routes/contact.js";
+import consoleRoutes from "./adminConsole/routes.js";
+import { CONSOLE_ORIGINS } from "./adminConsole/auth.js";
 import giftOrders from "./gift/routes/orders.js";
 import giftCoupons from "./gift/routes/coupons.js";
 import giftKynqExtra from "./gift/routes/kynq-extra.js";
+import giftCampus from "./gift/routes/campus.js";
 
 
 dotenv.config();
@@ -92,7 +95,7 @@ app.use(cookieParser());
 const ALLOWED_ORIGINS = process.env.CORS_ORIGINS
   ? process.env.CORS_ORIGINS.split(",").map((s) => s.trim()).filter(Boolean)
   : ["https://kynq.in", "https://www.kynq.in", "http://localhost:3007", "http://localhost:3000"];
-app.use(cors({ origin: ALLOWED_ORIGINS, credentials: true }));
+app.use(cors({ origin: [...ALLOWED_ORIGINS, ...CONSOLE_ORIGINS], credentials: true }));
 app.use(helmet());
 
 if (process.env.NODE_ENV === "development") {
@@ -112,6 +115,13 @@ const authLimiter = rateLimit({
 const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: isDev ? 10000 : 200,
+  message: { success: false, message: "Too many requests, please try again later" },
+});
+
+// The admin dashboard makes several calls per page view, so it gets its own, roomier limit.
+const consoleLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: isDev ? 10000 : 600,
   message: { success: false, message: "Too many requests, please try again later" },
 });
 
@@ -150,6 +160,9 @@ app.use("/api/homepage", generalLimiter, homepageRoutes);
 // kynq's contact form (POST /) is handled by the gift router; legacy admin
 // routes (GET/PUT/DELETE, Bearer-JWT-scoped) fall through untouched.
 app.use("/api/contact", authLimiter, giftContact);
+// Admin dashboard API (its own sign-in and allowlist; see src/adminConsole).
+app.use("/api/console/auth", authLimiter);
+app.use("/api/console", consoleLimiter, consoleRoutes);
 app.use("/api/contact", authLimiter, contactRoutes);
 app.use("/api/bulk-upload", generalLimiter, bulkUploadRoutes);
 app.use("/api/dashboard", generalLimiter, dashboardRoutes);
@@ -173,6 +186,7 @@ app.use("/api/pairings", generalLimiter, giftPairings);
 app.use("/api/checkout", generalLimiter, giftCheckout);
 app.use("/api/coupons", generalLimiter, giftCoupons);
 app.use("/api/kynq-extra", generalLimiter, giftKynqExtra);
+app.use("/api/campus", generalLimiter, giftCampus);
 // Session-cookie-scoped cart/wishlist/auth — this is what the frontend's
 // cart-context.tsx / auth-context.tsx actually calls.
 app.use("/api/cart", generalLimiter, giftCart);

@@ -44,6 +44,21 @@ export function recordGameWin(gameType, city) {
   push({ type: "game_win", game: gameType, a: city || null });
 }
 
+// Distinct signed-in people right now (a person with two tabs counts once), for the admin dashboard.
+export function getLiveCounts() {
+  const online = new Set();
+  const inCall = new Set();
+  if (io) {
+    for (const socket of io.sockets.sockets.values()) {
+      const id = socket.data?.scopedId;
+      if (!id) continue;
+      online.add(id);
+      if (socket.data.currentCallId) inCall.add(id);
+    }
+  }
+  return { online: online.size, inCall: inCall.size, connections: io ? io.engine.clientsCount : 0 };
+}
+
 export function getPulse() {
   rollDay();
   return {

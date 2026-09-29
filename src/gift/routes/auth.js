@@ -8,6 +8,7 @@ import {
 import { requestOtp, verifyOtp } from "../otp.js";
 import { mergeAnonymousIntoUser } from "../merge.js";
 import { ok, badRequest, unauthorized, tooMany, wrap } from "../http.js";
+import { attributeCampusSignup, CAMPUS_COOKIE } from "../../kynqExtra/campusLinks.js";
 
 const router = express.Router();
 const users = collection("users");
@@ -93,7 +94,10 @@ router.post("/google", otpLimiter, wrap(async (req, res) => {
   }
   if (!email || !emailVerified) return unauthorized(res, "That Google account's email isn't verified.");
 
-  const user = await getOrCreateUser(email, name);
+  const { user, isNew } = await getOrCreateUser(email, name);
+  if (isNew && req.cookies?.[CAMPUS_COOKIE]) {
+    await attributeCampusSignup(user.id, req.cookies[CAMPUS_COOKIE]).catch((err) => console.error("[campus] attribution failed for", user.id, ":", err.message));
+  }
   const { sessionId: anonSessionId } = getOrCreateSession(req, res);
   await mergeAnonymousIntoUser(anonSessionId, user.id);
   await signIn(res, user.id);

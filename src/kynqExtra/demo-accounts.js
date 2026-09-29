@@ -153,6 +153,12 @@ async function demoIdentities() {
   return cachedUsers;
 }
 
+/** Forget the cached clip list and demo identities (the admin console calls this after an upload or delete). */
+export function clearDemoVideoCache() {
+  cachedKeys = []; keysCachedAt = 0;
+  cachedUsers = []; usersCachedAt = 0;
+}
+
 const rand = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
 /**

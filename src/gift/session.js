@@ -46,11 +46,11 @@ export async function getOrCreateUser(email, name) {
   if (existing) {
     const updated = { ...existing, lastSeenAt: now, name: existing.name ?? name };
     await users.set(key, updated);
-    return updated;
+    return { user: updated, isNew: false };
   }
   const user = { id: `usr_${makeId()}`, email: key, name, createdAt: now, lastSeenAt: now, addresses: [] };
   await users.set(key, user);
-  return user;
+  return { user, isNew: true };
 }
 export async function saveUser(user) {
   await users.set(user.email.toLowerCase().trim(), user);
