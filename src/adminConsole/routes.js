@@ -67,7 +67,7 @@ router.get("/analytics", requireSection("analytics"), guard(async (req, res) => 
 router.get("/finance", requireSection("finance"), guard(async (req, res) => ok(res, await finance(rangeFromQuery(req.query)))));
 
 router.get("/live", requireSection("overview"), guard(async (req, res) => ok(res, liveNow())));
-router.get("/traffic/realtime", requireSection("traffic"), guard(async (req, res) => ok(res, await realtime())));
+router.get("/traffic/realtime", requireSection("overview", "traffic"), guard(async (req, res) => ok(res, await realtime())));
 router.get("/seo", requireSection("seo"), guard(async (req, res) => ok(res, await seo(rangeFromQuery(req.query)))));
 router.get("/traffic", requireSection("traffic"), guard(async (req, res) => ok(res, await traffic(rangeFromQuery(req.query)))));
 

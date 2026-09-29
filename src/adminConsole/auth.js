@@ -88,11 +88,12 @@ export async function requireAdmin(req, res, next) {
   next();
 }
 
-/** Gate a route to one sidebar section. Owners pass everything; a subadmin needs that
- * exact key in their allowedSections (assigned by an owner — see subadmins.js). */
-export function requireSection(key) {
+/** Gate a route to one or more sidebar sections (a subadmin needs just one of them — for data a
+ * route shares across pages, e.g. /traffic/realtime feeds both Overview's live strip and Traffic
+ * itself). Owners pass everything regardless. Keys are assigned by an owner — see subadmins.js. */
+export function requireSection(...keys) {
   return (req, res, next) => {
-    if (req.admin.role === "owner" || req.admin.allowedSections.includes(key)) return next();
+    if (req.admin.role === "owner" || keys.some((k) => req.admin.allowedSections.includes(k))) return next();
     return forbidden(res, "You don't have access to this section.");
   };
 }
