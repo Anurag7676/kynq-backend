@@ -9,8 +9,8 @@ import { SECTIONS } from "./sections.js";
 import { listSubadmins, upsertSubadmin, revokeSubadmin } from "./subadmins.js";
 import { overview, analytics, finance } from "./stats.js";
 import { listReports, reviewReport } from "./moderation.js";
-import { listUsers, getUser, restrictUser, revealEmail, setAmbassador } from "./users.js";
-import { listAmbassadors, ambassadorDetail } from "./ambassadors.js";
+import { listUsers, getUser, restrictUser, revealEmail, setAmbassador, creditWallet } from "./users.js";
+import { listAmbassadors, ambassadorDetail, listGoodieTiers, addGoodieTier, removeGoodieTier } from "./ambassadors.js";
 import { createCampus, listCampusLinks, campusLinkDetail, campusOverview } from "./campusLinks.js";
 import { listInbox, getInboxItem, setInboxStatus } from "./inbox.js";
 import { listAudit, logAudit } from "./audit.js";
@@ -87,9 +87,21 @@ router.post("/users/:id/ambassador", requireSection("users"), guard(async (req, 
   const r = await setAmbassador(req.params.id, req.body.enrolled, req.admin);
   return r ? ok(res, r) : notFound(res, "user not found");
 }));
+router.post("/users/:id/wallet/credit", requireSection("users"), guard(async (req, res) => {
+  const amount = Number(req.body?.amount);
+  if (!Number.isFinite(amount) || amount <= 0) return badRequest(res, "amount must be a positive number");
+  const r = await creditWallet(req.params.id, amount, req.body?.note, req.admin);
+  return r ? ok(res, r) : notFound(res, "user not found");
+}));
 
 router.get("/ambassadors", requireSection("ambassadors"), guard(async (req, res) => ok(res, await listAmbassadors(req.query))));
 router.get("/ambassadors/:id", requireSection("ambassadors"), guard(async (req, res) => { const d = await ambassadorDetail(req.params.id); return d ? ok(res, d) : notFound(res, "not an ambassador"); }));
+router.get("/ambassadors/goodie-tiers", requireSection("ambassadors"), guard(async (req, res) => ok(res, { tiers: await listGoodieTiers() })));
+router.post("/ambassadors/goodie-tiers", requireSection("ambassadors"), guard(async (req, res) => ok(res, await addGoodieTier(req.body, req.admin))));
+router.post("/ambassadors/goodie-tiers/:id/delete", requireSection("ambassadors"), guard(async (req, res) => {
+  const removed = await removeGoodieTier(req.params.id, req.admin);
+  return removed ? ok(res, { id: req.params.id, deleted: true }) : notFound(res, "tier not found");
+}));
 
 router.post("/campus-links", requireSection("campus-links"), guard(async (req, res) => {
   const name = req.body?.name;

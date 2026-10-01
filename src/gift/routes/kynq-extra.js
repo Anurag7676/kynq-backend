@@ -17,6 +17,7 @@ import { canSkip } from "../../kynqExtra/games.js";
 import { emitToUser } from "../../kynqExtra/signaling.js";
 import { listCallsForUser } from "../../kynqExtra/calls-store.js";
 import { getBalance, getHistory, EARN_RULES } from "../../kynqExtra/wallet.js";
+import { isAmbassador, todayProgress, history, goodiesProgress } from "../../kynqExtra/ambassador.js";
 import { listPacks, createCoinOrder, getCoinOrder, listCoinOrdersForUser, reconcileCoinOrder } from "../../kynqExtra/coins.js";
 import { getCurrentUser } from "../session.js";
 import { listCatalog, getInventory, buyGift, listGiftHistory, GiftError, InsufficientBalanceError } from "../../kynqExtra/gifts.js";
@@ -132,6 +133,18 @@ router.get("/calls", wrap(async (req, res) => {
   const { userId } = await getScopedId(req, res);
   if (!userId) return unauthorized(res, "sign in to use kynq extra");
   ok(res, { calls: await listCallsForUser(userId, Number(req.query.limit) || 50) });
+}));
+
+// GET /api/kynq-extra/ambassador — the signed-in user's own campus-ambassador
+// dashboard: today's 8-10pm task progress, day-by-day history, and this
+// month's Koin-spend gate + goodie-tier progress. Not an ambassador? Just
+// { isAmbassador: false } — the dashboard page redirects away.
+router.get("/ambassador", wrap(async (req, res) => {
+  const { userId } = await getScopedId(req, res);
+  if (!userId) return unauthorized(res, "sign in to use kynq extra");
+  if (!(await isAmbassador(userId))) return ok(res, { isAmbassador: false });
+  const [today, hist, goodies] = await Promise.all([todayProgress(userId), history(userId, 30), goodiesProgress(userId)]);
+  ok(res, { isAmbassador: true, today, history: hist, goodies });
 }));
 
 // GET /api/kynq-extra/turn-credentials — short-lived coturn creds, minted

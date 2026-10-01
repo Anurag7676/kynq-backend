@@ -18,6 +18,7 @@ import { attachPulse, recordGift, recordGameWin } from "./pulse.js";
 import { dropOnBlock } from "./friends.js";
 import crypto from "crypto";
 import { debit, credit, getBalance, InsufficientBalanceError } from "./wallet.js";
+import { recordCallForAmbassadors } from "./ambassador.js";
 import { ECONOMY, gamePrice, isPaidGenderPreference } from "./economy.js";
 import { getExtraProfile } from "./profile.js";
 import { activePassExpiry } from "./gender-pass.js";
@@ -85,7 +86,8 @@ async function leaveActiveCall(io, socket, reason) {
 
   await endMeter(callId); // bank the eligible chat time before the call closes
   closeInvite(io, callId, null); // an unanswered game invitation dies with the call (it cost nothing)
-  await endCall(callId, reason).catch((err) => console.error("[kynqExtra] endCall failed:", err));
+  const endedCall = await endCall(callId, reason).catch((err) => { console.error("[kynqExtra] endCall failed:", err); return null; });
+  if (endedCall) recordCallForAmbassadors(endedCall).catch((err) => console.error("[ambassador] recordCallForAmbassadors failed:", err));
   console.log(`[kynqExtra] call:ended  callId=${callId} reason=${reason}`);
   socket.to(callId).emit("call:ended", { reason });
   clearCallState(io, callId);
@@ -105,7 +107,8 @@ function scheduleGraceEnd(io, scopedId, callId, peerScopedId) {
     pendingDisconnects.delete(scopedId);
     await endMeter(callId);
     closeInvite(io, callId, null);
-    await endCall(callId, "peer_disconnected").catch((err) => console.error("[kynqExtra] endCall failed:", err));
+    const endedCall = await endCall(callId, "peer_disconnected").catch((err) => { console.error("[kynqExtra] endCall failed:", err); return null; });
+    if (endedCall) recordCallForAmbassadors(endedCall).catch((err) => console.error("[ambassador] recordCallForAmbassadors failed:", err));
     console.log(`[kynqExtra] call:ended  callId=${callId} reason=peer_disconnected (grace expired) scopedId=${scopedId}`);
     io.to(callId).emit("call:ended", { reason: "peer_disconnected" });
     clearCallState(io, callId);

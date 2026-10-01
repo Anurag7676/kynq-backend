@@ -11,7 +11,7 @@ export const TX_LABEL = {
   chat_minutes: "Chat rewards", first_chat: "First-chat bonus", referral: "Referral rewards", game_win: "Game wins",
   coin_purchase: "Purchased Koins", coin_refund: "Refunded purchases", game_refund: "Game refunds", gender_preference_refund: "Preference refunds",
   daily_activity: "Daily activity", filter_unlock: "Lens unlocks", game_fee: "Game fees", gender_preference: "Preference passes", gift_purchase: "Gifts",
-  ambassador_daily: "Campus ambassador reward",
+  ambassador_daily: "Campus ambassador reward", ambassador_monthly_grant: "Campus ambassador monthly grant", admin_grant: "Admin grant",
 };
 const labelOf = (type) => TX_LABEL[type] ?? type;
 

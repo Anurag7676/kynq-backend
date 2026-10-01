@@ -27,14 +27,24 @@ export const ECONOMY = {
     maxAttachPerReferrerPerDay: 20, // anti-farm throttle (PROPOSED)
   },
 
-  // Campus ambassador daily challenge. PROPOSED — product decisions, not engineering ones.
-  // Only calls of at least minCallSecondsToQualify count toward either goal below (stops
-  // instant-skip spam from faking a "20 calls" or "1 hour" day). See ambassador.js.
+  // Campus ambassador daily challenge. DECIDED by the product owner (2026-10-01).
+  // The task only counts during windowStartHour–windowEndHour IST each day — a call
+  // must START inside that window to count toward either goal below. Only calls of
+  // at least minCallSecondsToQualify count at all (stops instant-skip spam from
+  // faking a "10 calls" or "30 minute" day). See ambassador.js.
   ambassador: {
-    dailyQualifyingCalls: 20,
-    dailyCallSeconds: 60 * 60,       // 1 hour of real, qualifying call time
-    minCallSecondsToQualify: 2 * 60, // a call under 2 minutes counts toward neither goal
-    dailyRewardKoins: 50,            // PROPOSED — one-time bonus for the day the goal is met
+    timezone: "Asia/Kolkata",
+    windowStartHour: 20,             // 8 PM IST
+    windowEndHour: 22,               // 10 PM IST
+    dailyQualifyingCalls: 10,
+    dailyCallSeconds: 30 * 60,       // 30 minutes of real, qualifying call time
+    minCallSecondsToQualify: 3 * 60, // a call under 3 minutes counts toward neither goal
+    dailyRewardKoins: 50,            // one-time bonus for the day the goal is met
+    // Monthly Koin grant an ambassador must spend in full, in that same calendar
+    // month, to be eligible for that month's goodies — on top of the daily-task
+    // days required by whichever goodie tier they're going for (see ambassador.js
+    // grantMonthlyKoins / monthlySpendProgress, and ambassador_goodie_tiers).
+    monthlyGrantKoins: 5000,
   },
 
   games: {

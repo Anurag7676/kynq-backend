@@ -226,3 +226,13 @@ export async function reconcile(userId) {
 export function todayKey() {
   return new Date().toISOString().slice(0, 10);
 }
+
+/** Sum of Koins spent (negative-amount rows) since `sinceTs` — drives the
+ * campus-ambassador "spent this month" gate (see ambassador.js). */
+export async function spentSince(userId, sinceTs) {
+  const [agg] = await coll(TX).aggregate([
+    { $match: { userId, createdAt: { $gte: sinceTs }, amount: { $lt: 0 } } },
+    { $group: { _id: null, total: { $sum: "$amount" } } },
+  ]).toArray();
+  return Math.abs(agg?.total ?? 0);
+}

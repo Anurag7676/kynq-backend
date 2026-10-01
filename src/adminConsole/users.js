@@ -3,6 +3,7 @@ import { col, REAL_USER, pageParams, escapeRegex, maskEmail, displayName, setRes
 import { TX_LABEL } from "./stats.js";
 import { reportsForUser } from "./moderation.js";
 import { logAudit } from "./audit.js";
+import { credit } from "../kynqExtra/wallet.js";
 
 const ageOf = (dob) => { const t = Date.parse(dob); return Number.isNaN(t) ? null : Math.floor((Date.now() - t) / (365.2425 * 86_400_000)); };
 
@@ -80,6 +81,19 @@ export async function setAmbassador(id, enrolled, admin) {
   if (!(await setAmbassadorById(id, enrolled))) return null;
   await logAudit(admin.email, "user.ambassador", id, { enrolled });
   return { id, isAmbassador: enrolled };
+}
+
+// Manual Koin grant — goes through the same append-only ledger as every
+// other credit (never a raw balance edit), so it shows up in the user's own
+// wallet history like any other transaction. refId is the admin's own
+// request instant, so a double-click can't double-grant.
+export async function creditWallet(id, amount, note, admin) {
+  if (!Number.isFinite(amount) || amount <= 0) throw Object.assign(new Error("amount must be a positive number"), { code: "bad_request" });
+  const u = await col("users").findOne({ id }, { projection: { id: 1 } });
+  if (!u) return null;
+  const tx = await credit(id, "admin_grant", { refId: `${admin.email}:${Date.now()}`, amount: Math.round(amount), note: note?.trim() || `Manual grant by ${admin.email}` });
+  await logAudit(admin.email, "user.wallet_credit", id, { amount: Math.round(amount), note: note?.trim() || null });
+  return { id, amount: tx.amount, balanceAfter: tx.balanceAfter };
 }
 
 export async function revealEmail(id, admin) {
