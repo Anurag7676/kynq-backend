@@ -1,5 +1,5 @@
 // Users: search, profile view, restrict, and the (audited) reveal of a full email address.
-import { col, REAL_USER, pageParams, escapeRegex, maskEmail, displayName, setRestrictedById, setAmbassadorById } from "./util.js";
+import { col, REAL_USER, pageParams, escapeRegex, maskEmail, maskPhone, displayName, setRestrictedById, setAmbassadorById } from "./util.js";
 import { TX_LABEL } from "./stats.js";
 import { reportsForUser } from "./moderation.js";
 import { logAudit } from "./audit.js";
@@ -14,7 +14,7 @@ async function balances(ids) {
 }
 
 const row = (u, koins) => ({
-  id: u.id, name: displayName(u), emailMasked: maskEmail(u.email), createdAt: u.createdAt ?? null, lastSeenAt: u.lastSeenAt ?? null,
+  id: u.id, name: displayName(u), emailMasked: maskEmail(u.email), phoneMasked: maskPhone(u.phone), createdAt: u.createdAt ?? null, lastSeenAt: u.lastSeenAt ?? null,
   restricted: !!u.kynqExtraRestricted, ageVerified: !!u.ageVerified, gender: u.gender ?? null, state: u.state ?? null, koins,
   isAmbassador: !!u.isAmbassador,
 });
@@ -25,7 +25,7 @@ export async function listUsers(query) {
   const filter = { ...REAL_USER };
   if (q) {
     const rx = new RegExp(escapeRegex(q), "i");
-    filter.$or = [{ name: rx }, { email: rx }, { id: q }];
+    filter.$or = [{ name: rx }, { email: rx }, { phone: rx }, { id: q }];
   }
   if (query?.filter === "restricted") filter.kynqExtraRestricted = true;
   if (query?.filter === "ambassador") filter.isAmbassador = true;
@@ -53,7 +53,7 @@ export async function getUser(id) {
   ]);
   return {
     user: {
-      id: u.id, name: displayName(u), emailMasked: maskEmail(u.email), createdAt: u.createdAt ?? null, lastSeenAt: u.lastSeenAt ?? null,
+      id: u.id, name: displayName(u), emailMasked: maskEmail(u.email), phone: u.phone ?? null, createdAt: u.createdAt ?? null, lastSeenAt: u.lastSeenAt ?? null,
       restricted: !!u.kynqExtraRestricted, ageVerified: !!u.ageVerified, age: u.dob ? ageOf(u.dob) : null,
       gender: u.gender ?? null, state: u.state ?? null, city: u.city ?? null, interests: Array.isArray(u.interests) ? u.interests : [],
       isAmbassador: !!u.isAmbassador, ambassadorSince: u.ambassadorSince ?? null,

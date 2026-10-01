@@ -53,6 +53,12 @@ export function maskEmail(email) {
   return email.replace(/^(.{1,2}).*(@.*)$/, "$1***$2");
 }
 
+/** 9876543210 -> +91 ******3210 (the list never shows the full number; the detail page does). */
+export function maskPhone(phone) {
+  if (!phone || typeof phone !== "string") return null;
+  return `+91 ${"*".repeat(Math.max(phone.length - 4, 0))}${phone.slice(-4)}`;
+}
+
 export const escapeRegex = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 export function pageParams(query, maxLimit = 100) {

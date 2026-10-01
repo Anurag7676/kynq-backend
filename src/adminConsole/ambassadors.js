@@ -3,7 +3,7 @@
 // ambassador_days / ambassador_months; the challenge logic itself (crediting
 // Koins, checking the goal, granting + gating the monthly spend) lives
 // entirely in ambassador.js and is never duplicated here.
-import { col, displayName, maskEmail, pageParams } from "./util.js";
+import { col, displayName, maskEmail, maskPhone, pageParams } from "./util.js";
 import { ECONOMY } from "../kynqExtra/economy.js";
 import { peekGoodiesProgress, goodieTiers, createGoodieTier, deleteGoodieTier } from "../kynqExtra/ambassador.js";
 import { logAudit } from "./audit.js";
@@ -61,7 +61,7 @@ export async function listAmbassadors(query) {
       const c = completedByUser.get(u.id);
       const grant = grantByUser.get(u.id);
       return {
-        id: u.id, name: displayName(u), emailMasked: maskEmail(u.email), ambassadorSince: u.ambassadorSince ?? null,
+        id: u.id, name: displayName(u), emailMasked: maskEmail(u.email), phoneMasked: maskPhone(u.phone), ambassadorSince: u.ambassadorSince ?? null,
         today: { calls: t?.calls ?? 0, callSeconds: t?.callSeconds ?? 0, goalMet: !!t?.rewardedAt },
         totalDaysCompleted: c?.days ?? 0, totalKoinsEarned: c?.koins ?? 0,
         daysThisMonth: monthDaysByUser.get(u.id) ?? 0,
@@ -80,7 +80,7 @@ export async function ambassadorDetail(id) {
     peekGoodiesProgress(id),
   ]);
   return {
-    id: u.id, name: displayName(u), emailMasked: maskEmail(u.email), ambassadorSince: u.ambassadorSince ?? null,
+    id: u.id, name: displayName(u), emailMasked: maskEmail(u.email), phone: u.phone ?? null, ambassadorSince: u.ambassadorSince ?? null,
     days: days.map((d) => ({ date: d.date, calls: d.calls, callSeconds: d.callSeconds, goalMet: !!d.rewardedAt, rewardKoins: d.rewardKoins ?? 0 })),
     goodies,
   };
