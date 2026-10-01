@@ -73,6 +73,14 @@ export const INDIAN_CITIES = [
 export const INDIAN_STATES = [...new Set(INDIAN_CITIES.map((c) => c.state))].sort();
 const CITY_BY_NAME = new Map(INDIAN_CITIES.map((c) => [c.city, c]));
 
+// Collected, not OTP-verified. Accepts an optional "91"/"+91" prefix or
+// spaces/dashes and normalizes down to the bare 10-digit number.
+const PHONE_RE = /^[6-9]\d{9}$/;
+function normalizePhone(raw) {
+  const digits = String(raw ?? "").replace(/\D/g, "");
+  return digits.length === 12 && digits.startsWith("91") ? digits.slice(2) : digits;
+}
+
 // `preloadedUser`: skip the lookup when the caller already has the user doc (e.g. the GET
 // /profile route, which fetches it once via getCurrentUser and would otherwise fetch it again).
 export async function getExtraProfile(userId, preloadedUser) {
@@ -81,6 +89,7 @@ export async function getExtraProfile(userId, preloadedUser) {
   return {
     dob: user.dob ?? null,
     ageVerified: !!user.ageVerified,
+    phone: user.phone ?? null,
     interests: user.interests ?? [],
     locationScope: user.locationScope ?? "same-country",
     city: user.city ?? null,
@@ -94,11 +103,12 @@ export async function getExtraProfile(userId, preloadedUser) {
 // Set once at Kynq Extra onboarding. dob is immutable after the first
 // successful set — resubmitting a different DOB to game the age gate is
 // rejected, not silently overwritten.
-export async function setExtraProfile(userId, { dob, interests, locationScope, city, state, bio, gender }) {
+export async function setExtraProfile(userId, { dob, interests, locationScope, city, state, bio, gender, phone }) {
   const user = await findUserById(userId);
   if (!user) throw new Error("user not found");
 
   const patch = {};
+  const isFirstOnboarding = !!(dob && !user.dob);
   if (dob && !user.dob) {
     const result = validateDob(dob);
     if (!result.ok) throw new Error(result.reason);
@@ -107,6 +117,17 @@ export async function setExtraProfile(userId, { dob, interests, locationScope, c
   } else if (dob && user.dob) {
     throw new Error("date of birth can't be changed once set");
   }
+
+  if (phone !== undefined) {
+    const normalized = normalizePhone(phone);
+    if (!PHONE_RE.test(normalized)) throw new Error("enter a valid 10-digit Indian mobile number");
+    patch.phone = normalized;
+  } else if (isFirstOnboarding && !user.phone) {
+    // Required once, at the same moment the age gate first clears — existing
+    // accounts that onboarded before this field existed are never asked retroactively.
+    throw new Error("a phone number is required to finish setting up your account");
+  }
+
   if (interests) {
     const cleaned = [...new Set(interests)].filter((t) => INTEREST_TOPICS.includes(t)).slice(0, 3);
     patch.interests = cleaned;
