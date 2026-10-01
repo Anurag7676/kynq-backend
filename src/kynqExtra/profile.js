@@ -97,6 +97,7 @@ export async function getExtraProfile(userId, preloadedUser) {
     country: user.city ? "India" : null,
     bio: user.bio ?? "",
     gender: user.gender ?? null,
+    isAmbassador: !!user.isAmbassador,
   };
 }
 
