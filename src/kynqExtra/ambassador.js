@@ -151,6 +151,12 @@ export async function isAmbassador(userId) {
   return !!user?.isAmbassador;
 }
 
+/** null if not an ambassador; otherwise when they were enrolled. */
+export async function getAmbassador(userId) {
+  const user = await coll("users").findOne({ id: userId }, { projection: { isAmbassador: 1, ambassadorSince: 1 } });
+  return user?.isAmbassador ? { since: user.ambassadorSince ?? null } : null;
+}
+
 // ─── Monthly Koin grant + spend gate ───────────────────────────────────────
 
 /** Grants this month's Koins once (idempotent via refId=month) — call lazily,

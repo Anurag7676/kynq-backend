@@ -95,13 +95,16 @@ router.post("/users/:id/wallet/credit", requireSection("users"), guard(async (re
 }));
 
 router.get("/ambassadors", requireSection("ambassadors"), guard(async (req, res) => ok(res, await listAmbassadors(req.query))));
-router.get("/ambassadors/:id", requireSection("ambassadors"), guard(async (req, res) => { const d = await ambassadorDetail(req.params.id); return d ? ok(res, d) : notFound(res, "not an ambassador"); }));
+// Specific /ambassadors/goodie-tiers routes must come before /ambassadors/:id —
+// Express matches in registration order, and :id would otherwise swallow
+// "goodie-tiers" as an id and 404 ("not an ambassador").
 router.get("/ambassadors/goodie-tiers", requireSection("ambassadors"), guard(async (req, res) => ok(res, { tiers: await listGoodieTiers() })));
 router.post("/ambassadors/goodie-tiers", requireSection("ambassadors"), guard(async (req, res) => ok(res, await addGoodieTier(req.body, req.admin))));
 router.post("/ambassadors/goodie-tiers/:id/delete", requireSection("ambassadors"), guard(async (req, res) => {
   const removed = await removeGoodieTier(req.params.id, req.admin);
   return removed ? ok(res, { id: req.params.id, deleted: true }) : notFound(res, "tier not found");
 }));
+router.get("/ambassadors/:id", requireSection("ambassadors"), guard(async (req, res) => { const d = await ambassadorDetail(req.params.id); return d ? ok(res, d) : notFound(res, "not an ambassador"); }));
 
 router.post("/campus-links", requireSection("campus-links"), guard(async (req, res) => {
   const name = req.body?.name;

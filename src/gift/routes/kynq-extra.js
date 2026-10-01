@@ -17,7 +17,7 @@ import { canSkip } from "../../kynqExtra/games.js";
 import { emitToUser } from "../../kynqExtra/signaling.js";
 import { listCallsForUser } from "../../kynqExtra/calls-store.js";
 import { getBalance, getHistory, EARN_RULES } from "../../kynqExtra/wallet.js";
-import { isAmbassador, todayProgress, history, goodiesProgress } from "../../kynqExtra/ambassador.js";
+import { getAmbassador, todayProgress, history, goodiesProgress } from "../../kynqExtra/ambassador.js";
 import { listPacks, createCoinOrder, getCoinOrder, listCoinOrdersForUser, reconcileCoinOrder } from "../../kynqExtra/coins.js";
 import { getCurrentUser } from "../session.js";
 import { listCatalog, getInventory, buyGift, listGiftHistory, GiftError, InsufficientBalanceError } from "../../kynqExtra/gifts.js";
@@ -142,9 +142,11 @@ router.get("/calls", wrap(async (req, res) => {
 router.get("/ambassador", wrap(async (req, res) => {
   const { userId } = await getScopedId(req, res);
   if (!userId) return unauthorized(res, "sign in to use kynq extra");
-  if (!(await isAmbassador(userId))) return ok(res, { isAmbassador: false });
-  const [today, hist, goodies] = await Promise.all([todayProgress(userId), history(userId, 30), goodiesProgress(userId)]);
-  ok(res, { isAmbassador: true, today, history: hist, goodies });
+  const amb = await getAmbassador(userId);
+  if (!amb) return ok(res, { isAmbassador: false });
+  // ~1 year of days: drives the activity heatmap, streaks and badges (one doc per active day, so cheap).
+  const [today, hist, goodies] = await Promise.all([todayProgress(userId), history(userId, 371), goodiesProgress(userId)]);
+  ok(res, { isAmbassador: true, since: amb.since, today, history: hist, goodies });
 }));
 
 // GET /api/kynq-extra/turn-credentials — short-lived coturn creds, minted
