@@ -49,8 +49,10 @@ if (requested && process.env.NODE_ENV === "production") {
 // How long a real searcher waits before being offered a demo match: long enough that
 // two real testers online at once still match each other first.
 //
-// The wait is a flat 1 minute: with no real match, a demo is offered after 1 minute, and
-// again every minute after that. (Edit DEMO_DELAY_STEPS_MS to make it grow again.)
+// The wait is a flat 20 seconds: with no real match, a demo is offered after 20 seconds, and
+// again every 20 seconds after that. Set to 20s so a screen recording of the demo match
+// doesn't have to sit through a long search. (Edit DEMO_DELAY_STEPS_MS to change it, or
+// to make it grow again.)
 //
 // PERSISTED: the count and time of a person's last demo live in Mongo, on their
 // existing per-person record (kynq_extra_demo_seen: demoCount, lastDemoAt), so a
@@ -58,7 +60,7 @@ if (requested && process.env.NODE_ENV === "production") {
 // every second per waiting person, so it reads a small in-process cache (never the
 // database); the cache is filled once when someone joins the queue and is written
 // through on every change.
-export const DEMO_DELAY_STEPS_MS = [60_000];
+export const DEMO_DELAY_STEPS_MS = [20_000];
 export const DEMO_FALLBACK_MS = DEMO_DELAY_STEPS_MS[0]; // the first wait
 const DEMO_BACKOFF_RESET_MS = 30 * 60_000;
 const CACHE_MAX = 5000;
