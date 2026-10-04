@@ -109,7 +109,6 @@ export async function setExtraProfile(userId, { dob, interests, locationScope, c
   if (!user) throw new Error("user not found");
 
   const patch = {};
-  const isFirstOnboarding = !!(dob && !user.dob);
   if (dob && !user.dob) {
     const result = validateDob(dob);
     if (!result.ok) throw new Error(result.reason);
@@ -123,10 +122,6 @@ export async function setExtraProfile(userId, { dob, interests, locationScope, c
     const normalized = normalizePhone(phone);
     if (!PHONE_RE.test(normalized)) throw new Error("enter a valid 10-digit Indian mobile number");
     patch.phone = normalized;
-  } else if (isFirstOnboarding && !user.phone) {
-    // Required once, at the same moment the age gate first clears — existing
-    // accounts that onboarded before this field existed are never asked retroactively.
-    throw new Error("a phone number is required to finish setting up your account");
   }
 
   if (interests) {
