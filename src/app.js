@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import express from "express";
 import dotenv from "dotenv";
 import cors from "cors";
@@ -198,8 +199,11 @@ app.use("/api/wishlist", generalLimiter, giftWishlist);
 app.use("/api/auth", generalLimiter, giftAuth);
 
 // Health check
+// Also used by the deploy pipeline (scripts/deploy.sh) to decide whether to roll back,
+// so it reports the database too: 503 until Mongo is connected.
 app.get("/api/health", (req, res) => {
-  res.json({ status: "ok", timestamp: new Date().toISOString() });
+  const db = mongoose.connection.readyState === 1 ? "up" : "down";
+  res.status(db === "up" ? 200 : 503).json({ status: db === "up" ? "ok" : "degraded", db, commit: process.env.GIT_COMMIT || null, timestamp: new Date().toISOString() });
 });
 
 

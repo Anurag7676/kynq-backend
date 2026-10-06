@@ -1,0 +1,79 @@
+# Backend CI/CD: every push and PR is checked; pushes to main are deployed to EC2.
+#
+# One-time setup in GitHub → repo Settings:
+#   Secrets and variables → Actions → Secrets:
+#     EC2_HOST      public IP or DNS of the server
+#     EC2_USER      SSH user (e.g. ubuntu or ec2-user)
+#     EC2_SSH_KEY   private key for that user (the whole .pem file contents)
+#   … → Variables:
+#     APP_DIR       absolute path of the backend checkout on the server
+#     PM2_APP       pm2 process name or id to reload (defaults to "all")
+#     PORT          port the app listens on (defaults to 3001)
+name: Backend CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch: # manual re-deploy from the Actions tab
+
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('pr-{0}', github.ref) || 'production' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }} # never cut a deploy off halfway
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Syntax-check every source file
+        run: find src scripts -name '*.js' -print0 | xargs -0 -n1 node --check
+      - name: Load the whole app (catches broken imports and typos in names)
+        run: node --input-type=module -e "await import('./src/app.js'); console.log('app loads'); process.exit(0)"
+      - name: Deploy script is valid bash
+        run: bash -n scripts/deploy.sh
+
+  deploy:
+    needs: check
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    steps:
+      - name: Deploy over SSH (pull, install, pm2 reload, health check, auto-rollback)
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          APP_DIR: ${{ vars.APP_DIR }}
+          PM2_APP: ${{ vars.PM2_APP || 'all' }}
+          PORT: ${{ vars.PORT || '3001' }}
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          envs: APP_DIR,PM2_APP,PORT
+          command_timeout: 12m
+          script: |
+            set -e
+            # Login shells don't always have nvm/pm2 on PATH over SSH.
+            [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh"
+            cd "$APP_DIR"
+            git fetch --quiet origin main
+            # Always run the deploy script from the commit being deployed.
+            git show origin/main:scripts/deploy.sh > /tmp/kynq-deploy.sh
+            bash /tmp/kynq-deploy.sh
+
+      - name: Public health check
+        run: |
+          for i in $(seq 1 10); do
+            if curl -fsS --max-time 5 https://api-prod.kynq.in/api/health | tee /dev/stderr | grep -q '"status":"ok"'; then exit 0; fi
+            sleep 3
+          done
+          echo "api-prod.kynq.in is not healthy after deploy" >&2
+          exit 1
