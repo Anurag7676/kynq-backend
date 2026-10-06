@@ -116,6 +116,39 @@ function scheduleGraceEnd(io, scopedId, callId, peerScopedId) {
   pendingDisconnects.set(scopedId, { callId, peerScopedId, timer });
 }
 
+// Restriction takes effect immediately (see restrictions.js): leave the queue, end any live
+// call, tell every open tab why, and drop their connections. The other person sees an
+// ordinary "they left" — never that someone was restricted.
+export async function kickUser(scopedId) {
+  const io = ioRef;
+  matchmaker.leaveQueue(scopedId);
+  if (!io) return { sockets: 0 };
+
+  // A call parked in the reconnect grace period has no live socket to find, so end it directly.
+  const pending = pendingDisconnects.get(scopedId);
+  if (pending) {
+    clearTimeout(pending.timer);
+    pendingDisconnects.delete(scopedId);
+    await endMeter(pending.callId).catch(() => {});
+    closeInvite(io, pending.callId, null);
+    const ended = await endCall(pending.callId, "ended_by_user").catch(() => null);
+    if (ended) recordCallForAmbassadors(ended).catch(() => {});
+    io.to(pending.callId).emit("call:ended", { reason: "ended_by_user" });
+    clearCallState(io, pending.callId);
+  }
+
+  const ids = [...(userSockets.get(scopedId) ?? [])];
+  for (const sid of ids) {
+    const socket = io.sockets.sockets.get(sid);
+    if (!socket) continue;
+    await leaveActiveCall(io, socket, "ended_by_user").catch((err) => console.error("[kynqExtra] kick: leaveActiveCall failed:", err.message));
+    socket.emit("account:restricted", {});
+    socket.disconnect(true);
+  }
+  console.log(`[kynqExtra] kicked  scopedId=${scopedId} sockets=${ids.length}`);
+  return { sockets: ids.length };
+}
+
 // Called right after a fresh socket authenticates — if this scopedId was
 // mid-grace-period from a very recent disconnect, resume them into the
 // same call instead of leaving them stranded on the matching screen.

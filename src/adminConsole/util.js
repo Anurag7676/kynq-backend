@@ -96,6 +96,11 @@ export async function usersById(ids) {
 /** Restrict/unrestrict one user directly by id (same field the app reads), without loading every user. */
 export async function setRestrictedById(id, restricted) {
   const r = await col("users").updateOne({ id }, { $set: { kynqExtraRestricted: !!restricted } });
+  if (r.matchedCount > 0 && restricted) {
+    // Cut them off right now: sign them out everywhere, end any live call, drop them from the queue.
+    const { enforceRestriction } = await import("../kynqExtra/restrictions.js");
+    await enforceRestriction(id).catch((err) => console.error("[console] restriction enforcement failed for", id, ":", err.message));
+  }
   return r.matchedCount > 0;
 }
 

@@ -3,11 +3,11 @@ import rateLimit from "express-rate-limit";
 import { collection } from "../store.js";
 import {
   getOrCreateUser, saveUser,
-  signIn, signOut, getCurrentUser, getOrCreateSession,
+  signIn, signOut, getCurrentUser, getOrCreateSession, isLockedOut,
 } from "../session.js";
 import { requestOtp, verifyOtp } from "../otp.js";
 import { mergeAnonymousIntoUser } from "../merge.js";
-import { ok, badRequest, unauthorized, tooMany, wrap } from "../http.js";
+import { ok, badRequest, unauthorized, forbidden, tooMany, wrap } from "../http.js";
 import { attributeCampusSignup, CAMPUS_COOKIE } from "../../kynqExtra/campusLinks.js";
 
 const router = express.Router();
@@ -95,6 +95,9 @@ router.post("/google", otpLimiter, wrap(async (req, res) => {
   if (!email || !emailVerified) return unauthorized(res, "That Google account's email isn't verified.");
 
   const { user, isNew } = await getOrCreateUser(email, name);
+  if (isLockedOut(user)) {
+    return forbidden(res, "This account has been restricted, so you can't sign in. If you think this is a mistake, email hi@kynq.in.");
+  }
   if (isNew && req.cookies?.[CAMPUS_COOKIE]) {
     await attributeCampusSignup(user.id, req.cookies[CAMPUS_COOKIE]).catch((err) => console.error("[campus] attribution failed for", user.id, ":", err.message));
   }

@@ -3,6 +3,7 @@
 //   kynq_auth    — signed-in session token (email OTP auth, see otp.js)
 // Ports lib/server/{session,scope,auth,auth-store}.
 
+import mongoose from "mongoose";
 import { collection, makeToken, makeId } from "./store.js";
 
 const ANON_COOKIE = "kynq_session";
@@ -124,12 +125,25 @@ export async function signOut(req, res) {
   if (token) await sessions.delete(token);
   res.clearCookie(AUTH_COOKIE, { path: "/" });
 }
+// A restricted account (set by an admin, or automatically after 3 open reports) is locked
+// out of kynq entirely: no sign-in, no existing session, no matching. Unrestricting
+// restores access.
+export const isLockedOut = (user) => !!user?.kynqExtraRestricted;
+
+/** Signs a user out everywhere by deleting every auth session they hold. */
+export async function revokeSessionsForUser(userId) {
+  const r = await mongoose.connection.collection("auth-sessions").deleteMany({ userId });
+  return r.deletedCount;
+}
+
 export async function getCurrentUser(req) {
   const token = req.cookies?.[AUTH_COOKIE];
   if (!token) return null;
   const session = await getAuthSession(token);
   if (!session) return null;
-  return findUserById(session.userId);
+  const user = await findUserById(session.userId);
+  if (isLockedOut(user)) { await sessions.delete(token).catch(() => {}); return null; }
+  return user;
 }
 export async function requireCurrentUser(req) {
   const u = await getCurrentUser(req);
