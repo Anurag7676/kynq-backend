@@ -89,6 +89,10 @@ export const ECONOMY = {
     // except Heart shades and Halo. Colour filters and Beauty stay free.
     premiumLenses: ["puppy", "kitty", "bunny", "crown", "flowers", "butterflies", "blush", "devil", "robot", "vampire", "bighead"],
   },
+  // "Question for you two" (pair-question-live.js): both people earn this once a
+  // call when they've answered `rewardAfter` questions together; capped per day
+  // so two friends can't farm it by re-matching.
+  questions: { rewardAfter: 3, reward: 5, maxRewardedPerDay: 3 },
 };
 
 export const gamePrice = (gameType) => ECONOMY.games.prices[gameType] ?? 0;

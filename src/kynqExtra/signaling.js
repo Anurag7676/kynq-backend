@@ -27,6 +27,8 @@ import { startMeter, markConnected, pauseMeter, endMeter, onReward, ensureChatMe
 import { ensureDemoAccountIndexes, warmDemoBackoff, DEMO_MATCH_ENABLED } from "./demo-accounts.js";
 import { ensureBlockIndexes } from "./blocks.js";
 import { ensureCallsIndexes } from "./calls-store.js";
+import { startPairQuestions, stopPairQuestions, answerPairQuestion, skipPairQuestion } from "./pair-question-live.js";
+import { recordNudgeEvent, ensureNudgeEventIndexes } from "./nudge-events.js";
 
 // scopedId -> Set<socketId>, so REST routes (friend requests, DMs) can push
 // realtime events to a user wherever they are in the app.
@@ -69,6 +71,7 @@ function closeInvite(io, callId, reason) {
 // they're "already in a call" forever (there's no client round-trip that
 // would tell the server to clear the peer's own state otherwise).
 function clearCallState(io, callId) {
+  stopPairQuestions(callId);
   const roomSockets = io.sockets.adapter.rooms.get(callId);
   if (!roomSockets) return;
   for (const socketId of roomSockets) {
@@ -201,6 +204,7 @@ export function initSignaling(server) {
   ensureDemoAccountIndexes().catch(() => {});
   ensureBlockIndexes().catch(() => {});
   ensureCallsIndexes().catch(() => {});
+  ensureNudgeEventIndexes().catch(() => {});
   onReward((userId, payload) => emitToUser(userId, "wallet:updated", payload));
 
   io.use(async (socket, next) => {
@@ -311,6 +315,30 @@ export function initSignaling(server) {
       const message = await addChatMessage(callId, { from: scopedId, prompt });
       io.to(callId).emit("chat:message", message);
       ack?.({ ok: true, id: message.id });
+    });
+
+    // ─── "Question for you two" (pair-question-live.js) ───
+    // Sent by each client once its call is actually connected; the first starts the clock.
+    socket.on("question:ready", ({ callId } = {}) => {
+      if (!callId || callId !== socket.data.currentCallId || !socket.data.peerScopedId) return;
+      startPairQuestions(io, callId, scopedId, socket.data.peerScopedId);
+    });
+    socket.on("question:answer", async ({ callId, qid } = {}, ack) => {
+      if (!callId || callId !== socket.data.currentCallId) return ack?.({ ok: false });
+      const r = await answerPairQuestion(io, callId, qid, [scopedId, socket.data.peerScopedId].filter(Boolean)).catch(() => ({ ok: false, paid: [] }));
+      for (const p of r.paid) emitToUser(p.userId, "wallet:updated", { earned: p.amount, reason: "question" });
+      ack?.({ ok: r.ok });
+    });
+    socket.on("question:skip", ({ callId, qid } = {}, ack) => {
+      if (!callId || callId !== socket.data.currentCallId) return ack?.({ ok: false });
+      ack?.({ ok: skipPairQuestion(io, callId, qid) });
+    });
+
+    // In-call nudge analytics (nudge-events.js). Identity and call come from
+    // the authenticated socket, never from the payload.
+    socket.on("nudge:event", (p = {}) => {
+      if (!socket.data.userId) return;
+      void recordNudgeEvent({ userId: socket.data.userId, callId: socket.data.currentCallId, nudgeId: p.nudgeId, kind: p.kind, variant: p.variant, event: p.event, action: p.action });
     });
 
     // Recipient's client calls this once the message event has actually

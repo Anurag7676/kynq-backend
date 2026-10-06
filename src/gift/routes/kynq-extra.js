@@ -365,6 +365,7 @@ router.get("/economy", wrap(async (req, res) => {
     games,
     genderPreference: { price: ECONOMY.genderPreference.price, passMinutes: ECONOMY.genderPreference.passMs / 60000, paidPreferences: ECONOMY.genderPreference.paidPreferences },
     filters: filterCatalog(),
+    questions: { rewardAfter: ECONOMY.questions.rewardAfter, reward: ECONOMY.questions.reward },
   });
 }));
 
