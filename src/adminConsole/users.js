@@ -3,6 +3,7 @@ import { col, REAL_USER, pageParams, escapeRegex, maskEmail, maskPhone, displayN
 import { TX_LABEL } from "./stats.js";
 import { reportsForUser } from "./moderation.js";
 import { logAudit } from "./audit.js";
+import { userNudges } from "./nudges.js";
 import { credit } from "../kynqExtra/wallet.js";
 
 const ageOf = (dob) => { const t = Date.parse(dob); return Number.isNaN(t) ? null : Math.floor((Date.now() - t) / (365.2425 * 86_400_000)); };
@@ -43,13 +44,14 @@ export async function getUser(id) {
   const u = await col("users").findOne({ id });
   if (!u) return null;
   const callFilter = { $or: [{ participantA: id }, { participantB: id }] };
-  const [bal, history, callTotal, recentCalls, reports, orders] = await Promise.all([
+  const [bal, history, callTotal, recentCalls, reports, orders, nudges] = await Promise.all([
     balances([id]),
     col("wallet_transactions").find({ userId: id }).sort({ createdAt: -1 }).limit(50).toArray(),
     col("calls").countDocuments(callFilter),
     col("calls").find(callFilter).sort({ startedAt: -1 }).limit(10).toArray(),
     reportsForUser(id),
     col("coin_orders").find({ userId: id }).sort({ createdAt: -1 }).limit(20).toArray(),
+    userNudges(id),
   ]);
   return {
     user: {
@@ -68,6 +70,7 @@ export async function getUser(id) {
     },
     reports,
     orders: orders.map((o) => ({ id: o.id, packId: o.packId, coins: o.coins, inr: o.amount, status: o.status, createdAt: o.createdAt })),
+    nudges,
   };
 }
 

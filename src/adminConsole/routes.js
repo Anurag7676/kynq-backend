@@ -17,6 +17,7 @@ import { listAudit, logAudit } from "./audit.js";
 import { liveNow } from "./live.js";
 import { traffic, realtime } from "./ga.js";
 import { seo } from "./seo.js";
+import { nudgeStats } from "./nudges.js";
 import { listVideos, uploadVideo, deleteVideo, rebalance } from "./videos.js";
 
 const router = express.Router();
@@ -64,6 +65,7 @@ router.use(requireAdmin);
 
 router.get("/overview", requireSection("overview"), guard(async (req, res) => ok(res, await overview(rangeFromQuery(req.query)))));
 router.get("/analytics", requireSection("analytics"), guard(async (req, res) => ok(res, await analytics(rangeFromQuery(req.query)))));
+router.get("/nudges", requireSection("nudges"), guard(async (req, res) => ok(res, await nudgeStats(rangeFromQuery(req.query)))));
 router.get("/finance", requireSection("finance"), guard(async (req, res) => ok(res, await finance(rangeFromQuery(req.query)))));
 
 router.get("/live", requireSection("overview"), guard(async (req, res) => ok(res, liveNow())));

@@ -4,6 +4,7 @@
 export const SECTIONS = [
   { key: "overview", label: "Overview" },
   { key: "analytics", label: "Analytics" },
+  { key: "nudges", label: "Nudges" },
   { key: "traffic", label: "Traffic" },
   { key: "seo", label: "SEO" },
   { key: "finance", label: "Finance" },
