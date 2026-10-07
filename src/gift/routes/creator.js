@@ -2,8 +2,11 @@
 // page load; the frontend (CreatorTracker) reports the click once, and this sets the
 // 30-day attribution cookie read at sign-up (gift/routes/auth.js). Last click wins.
 import express from "express";
-import { recordCreatorClick, CREATOR_COOKIE, CREATOR_COOKIE_DAYS } from "../../kynqExtra/creators.js";
-import { ok, badRequest, wrap } from "../http.js";
+import { recordCreatorClick, findCreatorByEmail, CREATOR_COOKIE, CREATOR_COOKIE_DAYS } from "../../kynqExtra/creators.js";
+import { creatorPortal } from "../../adminConsole/creators.js";
+import { rangeFromQuery } from "../../adminConsole/util.js";
+import { getCurrentUser } from "../session.js";
+import { ok, badRequest, unauthorized, wrap } from "../http.js";
 
 const router = express.Router();
 
@@ -21,6 +24,18 @@ router.post("/track", wrap(async (req, res) => {
     });
   }
   ok(res, { tracked: !!creator });
+}));
+
+// The creator's own dashboard (kynq.in/creator). The signed-in kynq account is matched to a
+// creator by email; anyone else gets { creator: null }. `?summary=1` only answers "is this a creator?"
+// (used to show the Creator dashboard link on the account page).
+router.get("/me", wrap(async (req, res) => {
+  const user = await getCurrentUser(req);
+  if (!user) return unauthorized(res, "sign in to see your creator dashboard");
+  const creator = await findCreatorByEmail(user.email);
+  if (!creator) return ok(res, { creator: null, email: user.email });
+  if (req.query.summary) return ok(res, { creator: { name: creator.name, code: creator.code } });
+  ok(res, await creatorPortal(creator.id, rangeFromQuery(req.query)));
 }));
 
 export default router;

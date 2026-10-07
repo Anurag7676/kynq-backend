@@ -111,7 +111,7 @@ router.get("/ambassadors/:id", requireSection("ambassadors"), guard(async (req, 
 
 // ─── Creator referral program ───
 // Validation problems (bad code, taken code, bad rate/amount) come back as 400 with the reason.
-const userError = (res, err) => (/required|must|taken|between|more than/i.test(err?.message || "") ? badRequest(res, err.message) : null);
+const userError = (res, err) => (/required|must|taken|between|more than|already used/i.test(err?.message || "") ? badRequest(res, err.message) : null);
 router.get("/creators", requireSection("creators"), guard(async (req, res) => ok(res, await creatorsOverview(rangeFromQuery(req.query)))));
 router.post("/creators", requireSection("creators"), guard(async (req, res) => {
   try {

@@ -43,6 +43,7 @@ export function ensureCreatorIndexes() {
       col(CREATOR_COMMISSIONS).createIndex({ creatorId: 1, createdAt: -1 }),
       col(CREATOR_COMMISSIONS).createIndex({ createdAt: -1 }),
       col(CREATOR_PAYOUTS).createIndex({ creatorId: 1, createdAt: -1 }),
+      col(CREATORS).createIndex({ email: 1 }, { partialFilterExpression: { email: { $type: "string" } } }),
     ]).catch((err) => { indexesReady = null; throw err; });
   }
   return indexesReady;
@@ -61,6 +62,27 @@ export async function findCreatorByCode(code) {
 }
 export const getCreator = (id) => creators.get(String(id || ""));
 
+/** The creator a signed-in kynq account belongs to: matched on the email the admin saved for them. */
+export async function findCreatorByEmail(email) {
+  const e = String(email ?? "").trim().toLowerCase();
+  if (!e) return null;
+  const doc = await col(CREATORS).findOne({ email: e });
+  if (!doc) return null;
+  const { _id, _key, ...rest } = doc;
+  return rest;
+}
+// One login per creator: an email can belong to only one creator.
+async function assertEmailFree(email, exceptId) {
+  if (!email) return;
+  const other = await findCreatorByEmail(email);
+  if (other && other.id !== exceptId) throw new Error("that email is already used by another creator");
+}
+const cleanEmail = (v) => {
+  const e = String(v ?? "").trim().toLowerCase().slice(0, 120);
+  if (e && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) throw new Error("email must be a valid address");
+  return e || null;
+};
+
 export async function createCreator({ name, code, handle, email, commissionRate }, adminEmail) {
   const cleanName = String(name ?? "").trim();
   const cleanCode = normalizeCode(code);
@@ -70,13 +92,15 @@ export async function createCreator({ name, code, handle, email, commissionRate 
   if (!(rate >= 0 && rate <= 0.5)) throw new Error("commission rate must be between 0% and 50%");
   await ensureCreatorIndexes();
   if (await findCreatorByCode(cleanCode)) throw new Error("that code is already taken");
+  const loginEmail = cleanEmail(email);
+  await assertEmailFree(loginEmail);
 
   const id = makeId("crt");
   const now = Date.now();
   const doc = {
     id, code: cleanCode, name: cleanName.slice(0, 80),
     handle: String(handle ?? "").trim().replace(/^@/, "").slice(0, 60) || null,
-    email: String(email ?? "").trim().toLowerCase().slice(0, 120) || null,
+    email: loginEmail,
     commissionRate: rate, active: true, createdBy: adminEmail ?? null, createdAt: now, updatedAt: now,
   };
   await creators.set(id, doc);
@@ -96,7 +120,7 @@ export async function updateCreator(id, patch) {
   }
   if (patch.name !== undefined && String(patch.name).trim()) next.name = String(patch.name).trim().slice(0, 80);
   if (patch.handle !== undefined) next.handle = String(patch.handle ?? "").trim().replace(/^@/, "").slice(0, 60) || null;
-  if (patch.email !== undefined) next.email = String(patch.email ?? "").trim().toLowerCase().slice(0, 120) || null;
+  if (patch.email !== undefined) { next.email = cleanEmail(patch.email); await assertEmailFree(next.email, id); }
   await creators.set(id, next);
   return next;
 }

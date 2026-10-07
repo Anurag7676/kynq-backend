@@ -155,3 +155,23 @@ export async function updateCreatorForAdmin(id, body) {
   return doc ? { ...doc, url: creatorUrl(doc.code) } : null;
 }
 export const recordPayout = (id, body, admin) => addCreatorPayout(id, body || {}, admin?.email);
+
+/**
+ * What a creator sees about themselves on kynq.in/creator. Same numbers as the admin
+ * detail, minus anything about other people: referred users are "Referred user #n",
+ * commissions carry no user, payouts carry no internal note or admin email.
+ */
+export async function creatorPortal(id, range) {
+  const d = await creatorDetail(id, range);
+  if (!d) return null;
+  const order = [...d.referred].sort((a, b) => a.joinedAt - b.joinedAt);
+  const num = new Map(order.map((r, i) => [r.user.id, i + 1]));
+  const c = d.creator;
+  return {
+    creator: { name: c.name, handle: c.handle, code: c.code, url: c.url, commissionRate: c.commissionRate, active: c.active },
+    range: d.range, totals: d.totals, lifetime: d.lifetime, series: d.series,
+    referred: d.referred.map((r) => ({ n: num.get(r.user.id), joinedAt: r.joinedAt, orders: r.orders, commission: r.commission })),
+    commissions: d.commissions.map((x) => ({ n: num.get(x.user.id) ?? null, createdAt: x.createdAt, orderAmount: x.orderAmount, rate: x.rate, commission: x.commission, status: x.status })),
+    payouts: d.payouts.map((p) => ({ id: p.id, createdAt: p.createdAt, amount: p.amount, reference: p.reference })),
+  };
+}
