@@ -179,7 +179,10 @@ export function traffic({ days }) {
         devices: merge(rows(devices).map((r) => ({ device: notSet(r.dims[0]), users: r.mets[0] })), "device"),
         events: FUNNEL_EVENTS.map((name) => ({ name, count: eventRows.get(name)?.[0] ?? 0, users: eventRows.get(name)?.[1] ?? 0 })),
         heatmap,
-        notes: ["Google Analytics reports can lag by several hours; today's numbers may still grow.", "Numbers here are Google's own (visitors, including people who never sign up)."],
+        notes: [
+          "Today and yesterday are still being processed by Google. Until they are, many visits show as \u201cUnknown\u201d source, with no first page, and as not engaged, so those two days look worse than they are. They fill in within 24 to 48 hours.",
+          "Numbers here are Google's own (visitors, including people who never sign up).",
+        ],
         generatedAt: Date.now(),
       };
     }

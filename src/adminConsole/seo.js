@@ -152,12 +152,16 @@ export function seo({ days }) {
     const pageGroups = [...groups.values()].map((g) => ({ key: g.key, label: g.label, pages: g.pages.length, ...sumMetrics(g.pages) })).sort((a, b) => b.impressions - a.impressions);
     const otherByDay = new Map(otherDayRows.map((r) => [r.keys[0], r]));
 
-    const keys = dayKeys(startMs, endMs);
+    // Google publishes days one at a time; a day with no final data yet would draw as a fall to 0.
+    // End the series (and the range shown) at the last day Google has actually finished.
+    const lastDay = dayRows.reduce((m, r) => (r.keys[0] > m ? r.keys[0] : m), "");
+    const shownEnd = lastDay && lastDay < range.endDate ? lastDay : range.endDate;
+    const keys = dayKeys(startMs, endMs).filter((k) => k <= shownEnd);
     const byDay = new Map(dayRows.map((r) => [r.keys[0], r]));
     return {
       configured: true,
       site: SITE,
-      range: { days, startDate: range.startDate, endDate: range.endDate },
+      range: { days, startDate: range.startDate, endDate: shownEnd },
       totals: metrics(totalRows[0] ?? {}),
       previous: metrics(prevRows[0] ?? {}),
       series: fillSeries(keys, byDay, (date, r) => ({ date, clicks: r?.clicks ?? 0, impressions: r?.impressions ?? 0, otherClicks: otherByDay.get(date)?.clicks ?? 0 })),
@@ -172,7 +176,7 @@ export function seo({ days }) {
       countries: countryRows.map((r) => ({ country: r.keys[0].toUpperCase(), ...metrics(r) })),
       devices: deviceRows.map((r) => ({ device: r.keys[0].toLowerCase(), ...metrics(r) })),
       notes: [
-        `Search Console data runs about ${LAG_DAYS} days behind, so this range ends ${range.endDate}.`,
+        `Google finishes Search Console numbers about ${LAG_DAYS} to 3 days late, so this range ends ${shownEnd}, the last finished day.`,
         "Google hides very rare searches to protect privacy, so the listed searches add up to a bit less than the total.",
         "Position is the average ranking of your result in Google (1 is the top of page one).",
         "Brand searches contain \"kynq\" (or a common misspelling). Brand and other add up to a little less than the total because Google hides rare searches.",
