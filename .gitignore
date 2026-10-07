@@ -1,3 +1,6 @@
 node_modules/
 .env
 public/
+
+# GA4 service account key: local/server only, never commit
+key.json

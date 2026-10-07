@@ -17,10 +17,13 @@ const DEFAULT_TOKEN_URI = "https://oauth2.googleapis.com/token";
 // The events the app sends (see lib/analytics.ts in the site): the sign-up funnel, seen from GA's side.
 export const FUNNEL_EVENTS = ["page_view", "cta_start_click", "signup_started", "signin_completed", "signup_completed", "match_started", "call_connected", "call_failed", "eligible_chat_completed"];
 
+// Fallback when neither setting is given: Backend/key.json (gitignored — copy it onto the server by hand).
+const DEFAULT_KEY_FILE = new URL("../../key.json", import.meta.url);
+
 function credentials() {
   try {
     const raw = process.env.GA_SERVICE_ACCOUNT_JSON;
-    const file = process.env.GA_SERVICE_ACCOUNT_FILE;
+    const file = process.env.GA_SERVICE_ACCOUNT_FILE || (fs.existsSync(DEFAULT_KEY_FILE) ? DEFAULT_KEY_FILE : null);
     const text = raw ? (raw.trim().startsWith("{") ? raw : Buffer.from(raw, "base64").toString("utf8")) : file ? fs.readFileSync(file, "utf8") : null;
     if (!text) return null;
     const c = JSON.parse(text);
