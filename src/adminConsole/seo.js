@@ -10,6 +10,8 @@ import { accessToken, hasServiceAccount } from "./ga.js";
 import { cached, dayKeys, fillSeries } from "./util.js";
 
 const SCOPE = "https://www.googleapis.com/auth/webmasters.readonly";
+// kynq.in Domain property. Not a secret; SEARCH_CONSOLE_SITE overrides it.
+const SITE = process.env.SEARCH_CONSOLE_SITE || "sc-domain:kynq.in";
 const API = "https://www.googleapis.com/webmasters/v3/sites";
 const DAY = 86_400_000;
 // Search Console reports up to ~2 days behind; ending 2 days back keeps every day in range complete.
@@ -19,14 +21,14 @@ const iso = (ms) => new Date(ms).toISOString().slice(0, 10);
 
 export function seoStatus() {
   const missing = [];
-  if (!process.env.SEARCH_CONSOLE_SITE) missing.push("SEARCH_CONSOLE_SITE");
+  if (!SITE) missing.push("SEARCH_CONSOLE_SITE");
   if (!hasServiceAccount()) missing.push("GA_SERVICE_ACCOUNT_JSON (or GA_SERVICE_ACCOUNT_FILE)");
   return { configured: missing.length === 0, missing };
 }
 
 async function query(body) {
   const token = await accessToken(SCOPE);
-  const r = await fetch(`${API}/${encodeURIComponent(process.env.SEARCH_CONSOLE_SITE)}/searchAnalytics/query`, {
+  const r = await fetch(`${API}/${encodeURIComponent(SITE)}/searchAnalytics/query`, {
     method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify(body),
   });
   const j = await r.json().catch(() => ({}));
@@ -46,6 +48,22 @@ function friendlyError(err) {
 const round = (n, d = 1) => Math.round(n * 10 ** d) / 10 ** d;
 const metrics = (r) => ({ clicks: r.clicks ?? 0, impressions: r.impressions ?? 0, ctr: round(r.ctr ?? 0, 4), position: round(r.position ?? 0, 1) });
 const stripHost = (url) => { try { const u = new URL(url); return u.pathname + u.search || "/"; } catch { return url; } };
+
+// A Domain property reports kynq.in and www.kynq.in (and http/https) separately; with the host
+// stripped they share a path, so fold them: clicks/impressions add up, CTR is recomputed,
+// position is averaged by impressions.
+function mergePages(list) {
+  const out = new Map();
+  for (const r of list) {
+    const cur = out.get(r.page);
+    if (!cur) { out.set(r.page, { ...r }); continue; }
+    const imp = cur.impressions + r.impressions;
+    cur.position = imp ? Math.round(((cur.position * cur.impressions + r.position * r.impressions) / imp) * 10) / 10 : cur.position;
+    cur.clicks += r.clicks; cur.impressions = imp;
+    cur.ctr = imp ? Math.round((cur.clicks / imp) * 10000) / 10000 : 0;
+  }
+  return [...out.values()].sort((a, b) => b.clicks - a.clicks || b.impressions - a.impressions);
+}
 
 export function seo({ days }) {
   const status = seoStatus();
@@ -72,13 +90,13 @@ export function seo({ days }) {
     const byDay = new Map(dayRows.map((r) => [r.keys[0], r]));
     return {
       configured: true,
-      site: process.env.SEARCH_CONSOLE_SITE,
+      site: SITE,
       range: { days, startDate: range.startDate, endDate: range.endDate },
       totals: metrics(totalRows[0] ?? {}),
       previous: metrics(prevRows[0] ?? {}),
       series: fillSeries(keys, byDay, (date, r) => ({ date, clicks: r?.clicks ?? 0, impressions: r?.impressions ?? 0 })),
       queries: queryRows.map((r) => ({ query: r.keys[0], ...metrics(r) })),
-      pages: pageRows.map((r) => ({ page: stripHost(r.keys[0]), ...metrics(r) })),
+      pages: mergePages(pageRows.map((r) => ({ page: stripHost(r.keys[0]), ...metrics(r) }))),
       countries: countryRows.map((r) => ({ country: r.keys[0].toUpperCase(), ...metrics(r) })),
       devices: deviceRows.map((r) => ({ device: r.keys[0].toLowerCase(), ...metrics(r) })),
       notes: [
