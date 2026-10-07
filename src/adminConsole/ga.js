@@ -78,6 +78,21 @@ async function call(method, body) {
 const rows = (report) => (report?.rows || []).map((r) => ({ dims: (r.dimensionValues || []).map((d) => d.value), mets: (r.metricValues || []).map((m) => Number(m.value) || 0) }));
 const isoDate = (yyyymmdd) => `${yyyymmdd.slice(0, 4)}-${yyyymmdd.slice(4, 6)}-${yyyymmdd.slice(6, 8)}`;
 const notSet = (v) => (!v || v === "(not set)" ? "Unknown" : v);
+// "(not set)" and "" both become "Unknown": fold those rows together so each label appears once.
+// Rates (engagementRate) are averaged by sessions; everything else is summed.
+function merge(list, key) {
+  const out = new Map();
+  for (const r of list) {
+    const k = r[key], cur = out.get(k);
+    if (!cur) { out.set(k, { ...r }); continue; }
+    for (const [f, v] of Object.entries(r)) {
+      if (f === key || typeof v !== "number") continue;
+      if (f === "engagementRate") cur[f] = (cur[f] * (cur.sessions || 0) + v * (r.sessions || 0)) / Math.max(1, (cur.sessions || 0) + (r.sessions || 0));
+      else cur[f] += v;
+    }
+  }
+  return [...out.values()];
+}
 
 // A friendlier message for the setup mistakes people actually make.
 function friendlyError(err) {
@@ -104,13 +119,16 @@ export function realtime() {
         realtime: {
           activeNow: byRange.last30 ?? 0, last5: byRange.last5 ?? 0,
           pages: rows(pages).map((r) => ({ page: notSet(r.dims[0]), users: r.mets[0] })),
-          countries: rows(countries).map((r) => ({ country: notSet(r.dims[0]), users: r.mets[0] })),
+          countries: merge(rows(countries).map((r) => ({ country: notSet(r.dims[0]), users: r.mets[0] })), "country"),
         },
         generatedAt: Date.now(),
       };
     }
   }).catch((err) => ({ configured: true, ...friendlyError(err) }));
 }
+
+const TOTAL_METRICS = ["activeUsers", "newUsers", "sessions", "engagementRate", "averageSessionDuration", "screenPageViews"];
+const toTotals = (m) => ({ users: m[0] ?? 0, newUsers: m[1] ?? 0, sessions: m[2] ?? 0, engagementRate: m[3] ?? 0, avgSessionSec: Math.round(m[4] ?? 0), pageViews: m[5] ?? 0 });
 
 export function traffic({ days }) {
   const status = gaStatus();
@@ -121,7 +139,8 @@ export function traffic({ days }) {
       const top = (dimension, metric, limit, extra = {}) => ({ dateRanges, dimensions: [{ name: dimension }], metrics: [{ name: metric }], orderBys: [{ metric: { metricName: metric }, desc: true }], limit, ...extra });
       const [a, b] = await Promise.all([
         call("batchRunReports", { requests: [
-          { dateRanges, metrics: ["activeUsers", "newUsers", "sessions", "engagementRate", "averageSessionDuration", "screenPageViews"].map((name) => ({ name })) },
+          // Current and the same-length period before it, for the "vs previous period" chips.
+          { dateRanges: [...dateRanges, { startDate: `${2 * days + 1}daysAgo`, endDate: `${days + 1}daysAgo` }], metrics: TOTAL_METRICS.map((name) => ({ name })) },
           { dateRanges, dimensions: [{ name: "date" }], metrics: [{ name: "activeUsers" }, { name: "sessions" }], orderBys: [{ dimension: { dimensionName: "date" } }], limit: 100 },
           { dateRanges, dimensions: [{ name: "sessionDefaultChannelGroup" }], metrics: [{ name: "sessions" }, { name: "activeUsers" }], orderBys: [{ metric: { metricName: "sessions" }, desc: true }], limit: 8 },
           top("sessionSource", "sessions", 8),
@@ -131,25 +150,35 @@ export function traffic({ days }) {
           top("country", "activeUsers", 8),
           top("region", "activeUsers", 10, { dimensionFilter: { filter: { fieldName: "country", stringFilter: { value: "India", matchType: "EXACT" } } } }),
           top("deviceCategory", "activeUsers", 5),
-          { dateRanges, dimensions: [{ name: "eventName" }], metrics: [{ name: "eventCount" }], dimensionFilter: { filter: { fieldName: "eventName", inListFilter: { values: FUNNEL_EVENTS } } }, limit: 20 },
+          { dateRanges, dimensions: [{ name: "eventName" }], metrics: [{ name: "eventCount" }, { name: "totalUsers" }], dimensionFilter: { filter: { fieldName: "eventName", inListFilter: { values: FUNNEL_EVENTS } } }, limit: 20 },
+          // When people visit: weekday x hour, in the property's time zone (India).
+          { dateRanges, dimensions: [{ name: "dayOfWeek" }, { name: "hour" }], metrics: [{ name: "sessions" }], limit: 200 },
         ] }),
       ]);
       const [totals, series, channels, sources, landing] = a.reports || [];
-      const [countries, states, devices, events] = b.reports || [];
-      const t = rows(totals)[0]?.mets ?? [];
-      const eventCounts = new Map(rows(events).map((r) => [r.dims[0], r.mets[0]]));
+      const [countries, states, devices, events, hours] = b.reports || [];
+      // With two date ranges GA adds a "date_range_N" dimension to each row.
+      const byRange = new Map(rows(totals).map((r) => [r.dims[0] ?? "date_range_0", r.mets]));
+      const t = byRange.get("date_range_0") ?? [];
+      const prev = byRange.get("date_range_1") ?? null;
+      const eventRows = new Map(rows(events).map((r) => [r.dims[0], r.mets]));
+      // Heatmap rows are Monday-first; GA's dayOfWeek is 0 = Sunday.
+      const heatmap = Array.from({ length: 7 }, () => Array(24).fill(0));
+      for (const r of rows(hours)) { const d = (Number(r.dims[0]) + 6) % 7, h = Number(r.dims[1]); if (heatmap[d] && h >= 0 && h < 24) heatmap[d][h] = r.mets[0]; }
       return {
         configured: true,
         range: { days },
-        totals: { users: t[0] ?? 0, newUsers: t[1] ?? 0, sessions: t[2] ?? 0, engagementRate: t[3] ?? 0, avgSessionSec: Math.round(t[4] ?? 0), pageViews: t[5] ?? 0 },
+        totals: toTotals(t),
+        previous: prev ? toTotals(prev) : null,
         series: rows(series).map((r) => ({ date: isoDate(r.dims[0]), users: r.mets[0], sessions: r.mets[1] })),
-        channels: rows(channels).map((r) => ({ channel: notSet(r.dims[0]), sessions: r.mets[0], users: r.mets[1] })),
-        sources: rows(sources).map((r) => ({ source: notSet(r.dims[0]), sessions: r.mets[0] })),
-        landingPages: rows(landing).map((r) => ({ page: notSet(r.dims[0]), sessions: r.mets[0], users: r.mets[1], engagementRate: r.mets[2] })),
-        countries: rows(countries).map((r) => ({ country: notSet(r.dims[0]), users: r.mets[0] })),
-        states: rows(states).map((r) => ({ state: notSet(r.dims[0]), users: r.mets[0] })),
-        devices: rows(devices).map((r) => ({ device: notSet(r.dims[0]), users: r.mets[0] })),
-        events: FUNNEL_EVENTS.map((name) => ({ name, count: eventCounts.get(name) ?? 0 })),
+        channels: merge(rows(channels).map((r) => ({ channel: notSet(r.dims[0]), sessions: r.mets[0], users: r.mets[1] })), "channel"),
+        sources: merge(rows(sources).map((r) => ({ source: notSet(r.dims[0]), sessions: r.mets[0] })), "source"),
+        landingPages: merge(rows(landing).map((r) => ({ page: notSet(r.dims[0]), sessions: r.mets[0], users: r.mets[1], engagementRate: r.mets[2] })), "page"),
+        countries: merge(rows(countries).map((r) => ({ country: notSet(r.dims[0]), users: r.mets[0] })), "country"),
+        states: merge(rows(states).map((r) => ({ state: notSet(r.dims[0]), users: r.mets[0] })), "state"),
+        devices: merge(rows(devices).map((r) => ({ device: notSet(r.dims[0]), users: r.mets[0] })), "device"),
+        events: FUNNEL_EVENTS.map((name) => ({ name, count: eventRows.get(name)?.[0] ?? 0, users: eventRows.get(name)?.[1] ?? 0 })),
+        heatmap,
         notes: ["Google Analytics reports can lag by several hours; today's numbers may still grow.", "Numbers here are Google's own (visitors, including people who never sign up)."],
         generatedAt: Date.now(),
       };
