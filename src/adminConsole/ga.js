@@ -13,6 +13,8 @@ import { cached } from "./util.js";
 const SCOPE = "https://www.googleapis.com/auth/analytics.readonly";
 const API = "https://analyticsdata.googleapis.com/v1beta";
 const DEFAULT_TOKEN_URI = "https://oauth2.googleapis.com/token";
+// GA4 property "Kynq - Gifting". Not a secret; GA_PROPERTY_ID overrides it.
+const PROPERTY_ID = process.env.GA_PROPERTY_ID || "551122761";
 
 // The events the app sends (see lib/analytics.ts in the site): the sign-up funnel, seen from GA's side.
 export const FUNNEL_EVENTS = ["page_view", "cta_start_click", "signup_started", "signin_completed", "signup_completed", "match_started", "call_connected", "call_failed", "eligible_chat_completed"];
@@ -35,7 +37,7 @@ function credentials() {
 
 export function gaStatus() {
   const missing = [];
-  if (!process.env.GA_PROPERTY_ID) missing.push("GA_PROPERTY_ID");
+  if (!PROPERTY_ID) missing.push("GA_PROPERTY_ID");
   if (!credentials()) missing.push("GA_SERVICE_ACCOUNT_JSON (or GA_SERVICE_ACCOUNT_FILE)");
   return { configured: missing.length === 0, missing };
 }
@@ -64,7 +66,7 @@ export const hasServiceAccount = () => !!credentials();
 
 async function call(method, body) {
   const token = await accessToken();
-  const r = await fetch(`${API}/properties/${encodeURIComponent(process.env.GA_PROPERTY_ID)}:${method}`, {
+  const r = await fetch(`${API}/properties/${encodeURIComponent(PROPERTY_ID)}:${method}`, {
     method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify(body),
   });
   const j = await r.json().catch(() => ({}));
