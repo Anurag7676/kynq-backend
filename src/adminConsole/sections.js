@@ -12,6 +12,7 @@ export const SECTIONS = [
   { key: "users", label: "Users" },
   { key: "ambassadors", label: "Ambassadors" },
   { key: "campus-links", label: "Campus links" },
+  { key: "creators", label: "Creators" },
   { key: "videos", label: "Demo videos" },
   { key: "inbox", label: "Inbox" },
   { key: "audit", label: "Audit log" },

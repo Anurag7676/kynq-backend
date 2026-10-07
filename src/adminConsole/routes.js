@@ -12,6 +12,7 @@ import { listReports, reviewReport } from "./moderation.js";
 import { listUsers, getUser, restrictUser, revealEmail, setAmbassador, creditWallet } from "./users.js";
 import { listAmbassadors, ambassadorDetail, listGoodieTiers, addGoodieTier, removeGoodieTier } from "./ambassadors.js";
 import { createCampus, listCampusLinks, campusLinkDetail, campusOverview } from "./campusLinks.js";
+import { creatorsOverview, creatorDetail, createCreatorForAdmin, updateCreatorForAdmin, recordPayout } from "./creators.js";
 import { listInbox, getInboxItem, setInboxStatus } from "./inbox.js";
 import { listAudit, logAudit } from "./audit.js";
 import { liveNow } from "./live.js";
@@ -107,6 +108,38 @@ router.post("/ambassadors/goodie-tiers/:id/delete", requireSection("ambassadors"
   return removed ? ok(res, { id: req.params.id, deleted: true }) : notFound(res, "tier not found");
 }));
 router.get("/ambassadors/:id", requireSection("ambassadors"), guard(async (req, res) => { const d = await ambassadorDetail(req.params.id); return d ? ok(res, d) : notFound(res, "not an ambassador"); }));
+
+// ─── Creator referral program ───
+// Validation problems (bad code, taken code, bad rate/amount) come back as 400 with the reason.
+const userError = (res, err) => (/required|must|taken|between|more than/i.test(err?.message || "") ? badRequest(res, err.message) : null);
+router.get("/creators", requireSection("creators"), guard(async (req, res) => ok(res, await creatorsOverview(rangeFromQuery(req.query)))));
+router.post("/creators", requireSection("creators"), guard(async (req, res) => {
+  try {
+    const creator = await createCreatorForAdmin(req.body, req.admin);
+    await logAudit(req.admin.email, "creator.create", creator.id, { code: creator.code, name: creator.name, commissionRate: creator.commissionRate });
+    ok(res, { creator });
+  } catch (err) { if (!userError(res, err)) throw err; }
+}));
+router.get("/creators/:id", requireSection("creators"), guard(async (req, res) => {
+  const d = await creatorDetail(req.params.id, rangeFromQuery(req.query));
+  return d ? ok(res, d) : notFound(res, "creator not found");
+}));
+router.post("/creators/:id", requireSection("creators"), guard(async (req, res) => {
+  try {
+    const creator = await updateCreatorForAdmin(req.params.id, req.body);
+    if (!creator) return notFound(res, "creator not found");
+    await logAudit(req.admin.email, "creator.update", creator.id, req.body || {});
+    ok(res, { creator });
+  } catch (err) { if (!userError(res, err)) throw err; }
+}));
+router.post("/creators/:id/payouts", requireSection("creators"), guard(async (req, res) => {
+  try {
+    const payout = await recordPayout(req.params.id, req.body, req.admin);
+    if (!payout) return notFound(res, "creator not found");
+    await logAudit(req.admin.email, "creator.payout", req.params.id, { amount: payout.amount, reference: payout.reference });
+    ok(res, { payout });
+  } catch (err) { if (!userError(res, err)) throw err; }
+}));
 
 router.post("/campus-links", requireSection("campus-links"), guard(async (req, res) => {
   const name = req.body?.name;

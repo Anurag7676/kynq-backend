@@ -57,6 +57,7 @@ import giftOrders from "./gift/routes/orders.js";
 import giftCoupons from "./gift/routes/coupons.js";
 import giftKynqExtra from "./gift/routes/kynq-extra.js";
 import giftCampus from "./gift/routes/campus.js";
+import giftCreator from "./gift/routes/creator.js";
 
 
 dotenv.config();
@@ -188,6 +189,7 @@ app.use("/api/checkout", generalLimiter, giftCheckout);
 app.use("/api/coupons", generalLimiter, giftCoupons);
 app.use("/api/kynq-extra", generalLimiter, giftKynqExtra);
 app.use("/api/campus", generalLimiter, giftCampus);
+app.use("/api/creator", generalLimiter, giftCreator);
 // Session-cookie-scoped cart/wishlist/auth — this is what the frontend's
 // cart-context.tsx / auth-context.tsx actually calls.
 app.use("/api/cart", generalLimiter, giftCart);

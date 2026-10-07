@@ -9,6 +9,7 @@ import { requestOtp, verifyOtp } from "../otp.js";
 import { mergeAnonymousIntoUser } from "../merge.js";
 import { ok, badRequest, unauthorized, forbidden, tooMany, wrap } from "../http.js";
 import { attributeCampusSignup, CAMPUS_COOKIE } from "../../kynqExtra/campusLinks.js";
+import { attributeCreatorSignup, CREATOR_COOKIE } from "../../kynqExtra/creators.js";
 
 const router = express.Router();
 const users = collection("users");
@@ -100,6 +101,9 @@ router.post("/google", otpLimiter, wrap(async (req, res) => {
   }
   if (isNew && req.cookies?.[CAMPUS_COOKIE]) {
     await attributeCampusSignup(user.id, req.cookies[CAMPUS_COOKIE]).catch((err) => console.error("[campus] attribution failed for", user.id, ":", err.message));
+  }
+  if (isNew && req.cookies?.[CREATOR_COOKIE]) {
+    await attributeCreatorSignup(user.id, req.cookies[CREATOR_COOKIE]).catch((err) => console.error("[creators] attribution failed for", user.id, ":", err.message));
   }
   const { sessionId: anonSessionId } = getOrCreateSession(req, res);
   await mergeAnonymousIntoUser(anonSessionId, user.id);

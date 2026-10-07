@@ -14,6 +14,7 @@
 import { collection, makeId } from "../gift/store.js";
 import { cashfreeConfigured, cashfreeMode, createCashfreeOrder, getCashfreeOrder, demoPaymentsAllowed, PAYMENTS_UNAVAILABLE } from "../gift/cashfree.js";
 import { credit, debit } from "./wallet.js";
+import { recordCreatorCommission, reverseCreatorCommission } from "./creators.js";
 
 const orders = collection("coin_orders");
 const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:3000";
@@ -101,6 +102,7 @@ export async function markCoinOrderPaid(id, note) {
   await credit(order.userId, "coin_purchase", { refId: id, amount: order.coins, note: `bought ${order.coins} coins` });
   const next = withEvent({ ...order, status: "paid", paidAt: Date.now(), lastFailure: null }, "paid", note);
   await orders.set(id, next);
+  await recordCreatorCommission(next); // creator referral program; once per order, never throws
   return next;
 }
 
@@ -119,6 +121,7 @@ export async function markCoinOrderRefunded(id, note) {
   await debit(order.userId, "coin_refund", order.coins, { refId: id, note: `refund of ${order.coins} coins`, allowNegative: true });
   const next = withEvent({ ...order, status: "refunded", refundedAt: Date.now() }, "refunded", note);
   await orders.set(id, next);
+  await reverseCreatorCommission(id);
   return next;
 }
 
