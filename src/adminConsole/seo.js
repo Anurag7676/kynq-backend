@@ -65,6 +65,44 @@ function mergePages(list) {
   return [...out.values()].sort((a, b) => b.clicks - a.clicks || b.impressions - a.impressions);
 }
 
+// Searches for the brand itself (and its common misspellings). Everything else is "found us by topic":
+// the number SEO pages actually move.
+const BRAND_RE = "kyn[qgk]|kinq|kynk";
+const brandFilter = (operator) => [{ filters: [{ dimension: "query", operator, expression: BRAND_RE }] }];
+
+// Typical share of clicks by Google position (rounded industry averages). Only used to rank
+// opportunities by "extra clicks if this reached position 3" — an estimate, labelled as one.
+const CTR_AT = [0, 0.28, 0.16, 0.11, 0.08, 0.065, 0.05, 0.04, 0.035, 0.03, 0.025];
+const ctrAt = (p) => (p >= 1 && p <= 10 ? CTR_AT[Math.round(p)] : 0.01);
+
+const POSITION_BUCKETS = [
+  { key: "top3", label: "Top 3", max: 3.5 },
+  { key: "page1", label: "4 to 10", max: 10.5 },
+  { key: "page2", label: "11 to 20", max: 20.5 },
+  { key: "deep", label: "21 and lower", max: Infinity },
+];
+
+// Page types, from the URL. Keep in sync with the site's SEO page clusters.
+const PAGE_GROUPS = [
+  { key: "home", label: "Home page", test: (p) => p === "/" },
+  { key: "alternatives", label: "Alternatives and comparisons", test: (p) => /alternative|-vs-|sites-like/.test(p) },
+  { key: "safety", label: "Safety and trust", test: (p) => /safe|safety|is-omegle-back|trust/.test(p) },
+  { key: "ambassador", label: "Campus ambassador", test: (p) => /ambassador/.test(p) },
+  { key: "hinglish", label: "Hinglish and Hindi", test: (p) => /hindi|hinglish|kaise|dost|baat|yaar/.test(p) },
+  { key: "guides", label: "Guides, games and questions", test: (p) => /guide|journal|question|icebreaker|games|never-have|truth|make-friends|meet-new|strangers|faq/.test(p) },
+  { key: "about", label: "About and legal", test: (p) => /^\/(what-is-kynq|about|terms|privacy|contact|careers|story)/.test(p) },
+  { key: "store", label: "Gift store (old)", test: (p) => /^\/(shop|gift|gifts|occasions|bundles|collections|drops|custom|wishes|store|care|moments|in-the-wild|crossed-threads|search|cart|checkout)/.test(p) },
+  { key: "app", label: "App pages", test: (p) => /^\/(match|login|register|account|messages|history|kynq-koins|extra)/.test(p) },
+];
+const groupOf = (page) => (PAGE_GROUPS.find((g) => g.test(page)) ?? { key: "other", label: "Other" });
+
+function sumMetrics(list) {
+  const clicks = list.reduce((n, r) => n + r.clicks, 0);
+  const impressions = list.reduce((n, r) => n + r.impressions, 0);
+  const position = impressions ? round(list.reduce((n, r) => n + r.position * r.impressions, 0) / impressions, 1) : 0;
+  return { clicks, impressions, ctr: impressions ? round(clicks / impressions, 4) : 0, position };
+}
+
 export function seo({ days }) {
   const status = seoStatus();
   if (!status.configured) return Promise.resolve({ configured: false, missing: status.missing });
@@ -76,15 +114,43 @@ export function seo({ days }) {
     const range = { startDate: iso(startMs), endDate: iso(endMs) };
     const dim = (dimensions, rowLimit) => query({ ...range, dimensions, rowLimit, type: "web" });
 
-    const [totalRows, prevRows, dayRows, queryRows, pageRows, countryRows, deviceRows] = await Promise.all([
+    const prevRange = { startDate: iso(prevStart), endDate: iso(prevEnd) };
+    const [totalRows, prevRows, dayRows, queryRows, pageRows, countryRows, deviceRows, brandRows, otherRows, prevBrandRows, prevOtherRows, otherDayRows] = await Promise.all([
       query({ ...range, type: "web" }),
-      query({ startDate: iso(prevStart), endDate: iso(prevEnd), type: "web" }),
+      query({ ...prevRange, type: "web" }),
       dim(["date"], 500),
-      dim(["query"], 25),
-      dim(["page"], 25),
+      dim(["query"], 1000), // all of them: buckets and opportunities need more than the top 25
+      dim(["page"], 1000),
       dim(["country"], 8),
       dim(["device"], 4),
+      query({ ...range, type: "web", dimensionFilterGroups: brandFilter("includingRegex") }),
+      query({ ...range, type: "web", dimensionFilterGroups: brandFilter("excludingRegex") }),
+      query({ ...prevRange, type: "web", dimensionFilterGroups: brandFilter("includingRegex") }),
+      query({ ...prevRange, type: "web", dimensionFilterGroups: brandFilter("excludingRegex") }),
+      query({ ...range, type: "web", dimensions: ["date"], rowLimit: 500, dimensionFilterGroups: brandFilter("excludingRegex") }),
     ]);
+
+    const queries = queryRows.map((r) => ({ query: r.keys[0], ...metrics(r) }));
+    const pages = mergePages(pageRows.map((r) => ({ page: stripHost(r.keys[0]), ...metrics(r) })));
+    const isBrand = (q) => new RegExp(BRAND_RE, "i").test(q);
+
+    const positions = POSITION_BUCKETS.map((b, i) => {
+      const min = i === 0 ? 0 : POSITION_BUCKETS[i - 1].max;
+      const inB = queries.filter((q) => q.position > min && q.position <= b.max);
+      return { key: b.key, label: b.label, queries: inB.length, clicks: inB.reduce((n, q) => n + q.clicks, 0), impressions: inB.reduce((n, q) => n + q.impressions, 0) };
+    });
+
+    const opportunities = queries
+      .filter((q) => !isBrand(q.query) && q.position > 3 && q.impressions >= 10)
+      .map((q) => ({ ...q, extraClicks: Math.round(q.impressions * Math.max(0, ctrAt(3) - q.ctr)) }))
+      .filter((q) => q.extraClicks > 0)
+      .sort((a, b) => b.extraClicks - a.extraClicks)
+      .slice(0, 10);
+
+    const groups = new Map();
+    for (const pg of pages) { const g = groupOf(pg.page); const cur = groups.get(g.key) ?? { key: g.key, label: g.label, pages: [] }; cur.pages.push(pg); groups.set(g.key, cur); }
+    const pageGroups = [...groups.values()].map((g) => ({ key: g.key, label: g.label, pages: g.pages.length, ...sumMetrics(g.pages) })).sort((a, b) => b.impressions - a.impressions);
+    const otherByDay = new Map(otherDayRows.map((r) => [r.keys[0], r]));
 
     const keys = dayKeys(startMs, endMs);
     const byDay = new Map(dayRows.map((r) => [r.keys[0], r]));
@@ -94,15 +160,23 @@ export function seo({ days }) {
       range: { days, startDate: range.startDate, endDate: range.endDate },
       totals: metrics(totalRows[0] ?? {}),
       previous: metrics(prevRows[0] ?? {}),
-      series: fillSeries(keys, byDay, (date, r) => ({ date, clicks: r?.clicks ?? 0, impressions: r?.impressions ?? 0 })),
-      queries: queryRows.map((r) => ({ query: r.keys[0], ...metrics(r) })),
-      pages: mergePages(pageRows.map((r) => ({ page: stripHost(r.keys[0]), ...metrics(r) }))),
+      series: fillSeries(keys, byDay, (date, r) => ({ date, clicks: r?.clicks ?? 0, impressions: r?.impressions ?? 0, otherClicks: otherByDay.get(date)?.clicks ?? 0 })),
+      // Brand = searches for "kynq" itself; other = people who found kynq by topic.
+      brand: { current: metrics(brandRows[0] ?? {}), previous: metrics(prevBrandRows[0] ?? {}) },
+      other: { current: metrics(otherRows[0] ?? {}), previous: metrics(prevOtherRows[0] ?? {}) },
+      positions,
+      opportunities,
+      pageGroups,
+      queries: queries.slice(0, 25),
+      pages: pages.slice(0, 25),
       countries: countryRows.map((r) => ({ country: r.keys[0].toUpperCase(), ...metrics(r) })),
       devices: deviceRows.map((r) => ({ device: r.keys[0].toLowerCase(), ...metrics(r) })),
       notes: [
         `Search Console data runs about ${LAG_DAYS} days behind, so this range ends ${range.endDate}.`,
         "Google hides very rare searches to protect privacy, so the listed searches add up to a bit less than the total.",
         "Position is the average ranking of your result in Google (1 is the top of page one).",
+        "Brand searches contain \"kynq\" (or a common misspelling). Brand and other add up to a little less than the total because Google hides rare searches.",
+        "Extra clicks are an estimate: what each search would get at position 3 with a typical click-through rate, minus what it gets now.",
       ],
       generatedAt: Date.now(),
     };
