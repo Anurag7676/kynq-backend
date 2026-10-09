@@ -103,6 +103,38 @@ function sumMetrics(list) {
   return { clicks, impressions, ctr: impressions ? round(clicks / impressions, 4) : 0, position };
 }
 
+// Competitor searches we track week by week (regexes include common misspellings).
+const TRACKED = [
+  { key: "monkey", label: "Monkey", page: "/monkey-alternative/", re: "m[ao]n?k[ae]?y|munky|mankey" },
+  { key: "azar", label: "Azar", page: "/azar-alternative/", re: "azar" },
+  { key: "ometv", label: "OmeTV", page: "/ome-tv-alternative/", re: "ome ?\\.?tv|ometv" },
+  { key: "chatroulette", label: "Chatroulette", page: "/chatroulette-alternative/", re: "chat ?roulette" },
+  { key: "omegle", label: "Omegle", page: "/omegle-alternative/", re: "omegle" },
+];
+const TRACK_WEEKS = 8;
+
+/** Weekly impressions, clicks and average rank for each tracked group, plus its top searches (last 4 weeks). */
+async function trackedGroups(endMs) {
+  const start = endMs - (TRACK_WEEKS * 7 - 1) * DAY;
+  const range = { startDate: iso(start), endDate: iso(endMs), type: "web" };
+  const filter = (re) => ({ dimensionFilterGroups: [{ filters: [{ dimension: "query", operator: "includingRegex", expression: re }] }] });
+  return Promise.all(TRACKED.map(async (g) => {
+    const [daysRows, queryRows] = await Promise.all([
+      query({ ...range, dimensions: ["date"], rowLimit: 500, ...filter(g.re) }),
+      query({ startDate: iso(endMs - 27 * DAY), endDate: iso(endMs), type: "web", dimensions: ["query"], rowLimit: 8, ...filter(g.re) }),
+    ]);
+    const weeks = Array.from({ length: TRACK_WEEKS }, (_, i) => {
+      const from = iso(start + i * 7 * DAY), to = iso(start + (i * 7 + 6) * DAY);
+      const inWeek = daysRows.filter((r) => r.keys[0] >= from && r.keys[0] <= to);
+      const impressions = inWeek.reduce((n, r) => n + r.impressions, 0);
+      const clicks = inWeek.reduce((n, r) => n + r.clicks, 0);
+      const position = impressions ? round(inWeek.reduce((n, r) => n + r.position * r.impressions, 0) / impressions, 1) : null;
+      return { weekStart: from, impressions, clicks, position };
+    });
+    return { key: g.key, label: g.label, page: g.page, weeks, queries: queryRows.map((r) => ({ query: r.keys[0], ...metrics(r) })) };
+  }));
+}
+
 export function seo({ days }) {
   const status = seoStatus();
   if (!status.configured) return Promise.resolve({ configured: false, missing: status.missing });
@@ -151,6 +183,7 @@ export function seo({ days }) {
     for (const pg of pages) { const g = groupOf(pg.page); const cur = groups.get(g.key) ?? { key: g.key, label: g.label, pages: [] }; cur.pages.push(pg); groups.set(g.key, cur); }
     const pageGroups = [...groups.values()].map((g) => ({ key: g.key, label: g.label, pages: g.pages.length, ...sumMetrics(g.pages) })).sort((a, b) => b.impressions - a.impressions);
     const otherByDay = new Map(otherDayRows.map((r) => [r.keys[0], r]));
+    const tracked = await trackedGroups(endMs).catch((err) => { console.error("[seo] tracked groups failed:", err.message); return []; });
 
     // Google publishes days one at a time; a day with no final data yet would draw as a fall to 0.
     // End the series (and the range shown) at the last day Google has actually finished.
@@ -171,6 +204,7 @@ export function seo({ days }) {
       positions,
       opportunities,
       pageGroups,
+      tracked,
       queries: queries.slice(0, 25),
       pages: pages.slice(0, 25),
       countries: countryRows.map((r) => ({ country: r.keys[0].toUpperCase(), ...metrics(r) })),
