@@ -11,6 +11,7 @@
 // with the order id as the idempotency key, so duplicate webhooks and
 // reconcile races can never credit twice. The wallet is never written from
 // anything the client sends.
+import mongoose from "mongoose";
 import { collection, makeId } from "../gift/store.js";
 import { cashfreeConfigured, cashfreeMode, createCashfreeOrder, getCashfreeOrder, demoPaymentsAllowed, PAYMENTS_UNAVAILABLE } from "../gift/cashfree.js";
 import { credit, debit } from "./wallet.js";
@@ -41,9 +42,14 @@ export async function getCoinOrder(id) {
   return orders.get(id);
 }
 
+// Indexed query (was: load every order, filter in JS).
+let userIndexReady = null;
 export async function listCoinOrdersForUser(userId, limit = 20) {
-  const all = await orders.find((o) => o.userId === userId);
-  return all.sort((a, b) => b.createdAt - a.createdAt).slice(0, limit);
+  const c = mongoose.connection.collection("coin_orders");
+  userIndexReady ??= c.createIndex({ userId: 1, createdAt: -1 }).catch((err) => { userIndexReady = null; throw err; });
+  await userIndexReady;
+  const rows = await c.find({ userId }).sort({ createdAt: -1 }).limit(Math.min(100, Math.max(1, limit))).toArray();
+  return rows.map(({ _id, _key, ...rest }) => rest);
 }
 
 /**
