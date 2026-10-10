@@ -8,6 +8,7 @@ export const SECTIONS = [
   { key: "traffic", label: "Traffic" },
   { key: "seo", label: "SEO" },
   { key: "finance", label: "Finance" },
+  { key: "accounts", label: "Accounts" },
   { key: "moderation", label: "Moderation" },
   { key: "users", label: "Users" },
   { key: "ambassadors", label: "Ambassadors" },

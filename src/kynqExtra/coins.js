@@ -15,6 +15,7 @@ import { collection, makeId } from "../gift/store.js";
 import { cashfreeConfigured, cashfreeMode, createCashfreeOrder, getCashfreeOrder, demoPaymentsAllowed, PAYMENTS_UNAVAILABLE } from "../gift/cashfree.js";
 import { credit, debit } from "./wallet.js";
 import { recordCreatorCommission, reverseCreatorCommission } from "./creators.js";
+import { assignKoinInvoiceNumber } from "../accounting/core.js";
 
 const orders = collection("coin_orders");
 const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:3000";
@@ -103,6 +104,7 @@ export async function markCoinOrderPaid(id, note) {
   const next = withEvent({ ...order, status: "paid", paidAt: Date.now(), lastFailure: null }, "paid", note);
   await orders.set(id, next);
   await recordCreatorCommission(next); // creator referral program; once per order, never throws
+  await assignKoinInvoiceNumber(id);   // KQ/<FY>/<n>; never throws
   return next;
 }
 

@@ -2,6 +2,7 @@ import dotenv from "dotenv";
 import app from "./app.js";
 import connectDB from "./config/dbconnection.js";
 import { initSignaling } from "./kynqExtra/signaling.js";
+import { startRenewalReminders } from "./accounting/core.js";
 import { stopMatchmaker } from "./kynqExtra/matchmaker.js";
 
 dotenv.config();
@@ -17,6 +18,7 @@ const server = app.listen(PORT, () => {
 // Kynq Extra's Socket.io server mounts on the same persistent HTTP server —
 // see the plan's realtime-signaling decision (no separate process/service).
 initSignaling(server);
+startRenewalReminders(); // hourly: subscription renewal emails to admins
 
 const shutdown = (signal) => {
   console.log(`\n${signal} received. Shutting down gracefully…`);

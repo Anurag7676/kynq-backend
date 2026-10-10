@@ -20,6 +20,8 @@ import { getBalance, getHistory, EARN_RULES } from "../../kynqExtra/wallet.js";
 import { getAmbassador, todayProgress, history, goodiesProgress } from "../../kynqExtra/ambassador.js";
 import { listPacks, createCoinOrder, getCoinOrder, listCoinOrdersForUser, reconcileCoinOrder } from "../../kynqExtra/coins.js";
 import { getCurrentUser } from "../session.js";
+import { getKoinInvoiceData } from "../../accounting/core.js";
+import { koinInvoicePdf } from "../../accounting/pdf.js";
 import { listCatalog, getInventory, buyGift, listGiftHistory, GiftError, InsufficientBalanceError } from "../../kynqExtra/gifts.js";
 import {
   proposeChallenge, respondToChallenge, listMyChallenges, getChallenge,
@@ -291,6 +293,17 @@ router.get("/coins/orders/:id", wrap(async (req, res) => {
   if (!order || order.userId !== userId) return badRequest(res, "order not found");
   order = await reconcileCoinOrder(order);
   ok(res, { order });
+}));
+// The buyer's own invoice for a paid Koin order (PDF).
+router.get("/coins/orders/:id/invoice", wrap(async (req, res) => {
+  const { userId } = await getScopedId(req, res);
+  if (!userId) return unauthorized(res, "sign in to download your invoice");
+  const d = await getKoinInvoiceData(req.params.id, { userId });
+  if (!d) return badRequest(res, "no paid order with that id");
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", `attachment; filename="kynq-invoice-${String(d.order.invoiceNo).replace(/[^A-Za-z0-9._-]+/g, "-")}.pdf"`);
+  res.setHeader("Cache-Control", "no-store");
+  res.send(await koinInvoicePdf(d));
 }));
 
 // ─── Virtual gifts (see kynqExtra/gifts.js). Sending happens over the

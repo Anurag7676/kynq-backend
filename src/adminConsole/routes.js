@@ -13,6 +13,9 @@ import { listUsers, getUser, restrictUser, revealEmail, setAmbassador, creditWal
 import { listAmbassadors, ambassadorDetail, listGoodieTiers, addGoodieTier, removeGoodieTier } from "./ambassadors.js";
 import { createCampus, listCampusLinks, campusLinkDetail, campusOverview } from "./campusLinks.js";
 import { creatorsOverview, creatorDetail, createCreatorForAdmin, updateCreatorForAdmin, recordPayout } from "./creators.js";
+import * as acct from "../accounting/core.js";
+import { koinInvoicePdf, clientInvoicePdf } from "../accounting/pdf.js";
+import { excludedUserIds } from "./util.js";
 import { listInbox, getInboxItem, setInboxStatus } from "./inbox.js";
 import { listAudit, logAudit } from "./audit.js";
 import { liveNow } from "./live.js";
@@ -112,6 +115,53 @@ router.get("/ambassadors/:id", requireSection("ambassadors"), guard(async (req, 
 // ─── Creator referral program ───
 // Validation problems (bad code, taken code, bad rate/amount) come back as 400 with the reason.
 const userError = (res, err) => (/required|must|taken|between|more than|already used/i.test(err?.message || "") ? badRequest(res, err.message) : null);
+// ─── Accounts: expenses, income, subscriptions, invoices, overview, exports ───
+// Validation problems come back as 400 with the reason; deletes are soft and audited.
+const A = (fn) => guard(async (req, res) => {
+  try { return await fn(req, res); } catch (err) { if (err instanceof acct.UserError) return badRequest(res, err.message); throw err; }
+});
+const sendFile = (res, buf, type, filename) => { res.setHeader("Content-Type", type); res.setHeader("Content-Disposition", `attachment; filename="${filename}"`); res.setHeader("Cache-Control", "no-store"); res.send(buf); };
+const safeFile = (s) => String(s).replace(/[^A-Za-z0-9._-]+/g, "-");
+const sec = requireSection("accounts");
+router.get("/accounts/overview", sec, A(async (req, res) => ok(res, await acct.overview({ months: req.query.months, excludedUserIds: await excludedUserIds() }))));
+router.get("/accounts/settings", sec, A(async (req, res) => ok(res, { settings: await acct.getSettings(), expenseCategories: acct.EXPENSE_CATEGORIES, incomeCategories: acct.INCOME_CATEGORIES, paymentMethods: acct.PAYMENT_METHODS })));
+router.post("/accounts/settings", sec, A(async (req, res) => { const s = await acct.saveSettings(req.body || {}, req.admin.email); await logAudit(req.admin.email, "accounts.settings", "settings", {}); ok(res, { settings: s }); }));
+for (const kind of ["expense", "income"]) {
+  const base = kind === "expense" ? "/accounts/expenses" : "/accounts/income";
+  router.get(base, sec, A(async (req, res) => ok(res, await acct.listEntries(kind, req.query))));
+  router.post(base, sec, A(async (req, res) => { const e = await acct.createEntry(kind, req.body || {}, req.admin.email); await logAudit(req.admin.email, `accounts.${kind}.create`, e.id, { amountInr: e.amountInr }); ok(res, { entry: e }); }));
+  router.post(`${base}/:id`, sec, A(async (req, res) => { const e = await acct.updateEntry(kind, req.params.id, req.body || {}, req.admin.email); if (!e) return notFound(res, "not found"); await logAudit(req.admin.email, `accounts.${kind}.update`, e.id, {}); ok(res, { entry: e }); }));
+  router.post(`${base}/:id/delete`, sec, A(async (req, res) => { const r = await acct.deleteEntry(kind, req.params.id, req.admin.email); if (!r) return notFound(res, "not found"); await logAudit(req.admin.email, `accounts.${kind}.delete`, req.params.id, {}); ok(res, r); }));
+}
+router.get("/accounts/subscriptions", sec, A(async (req, res) => ok(res, await acct.listSubscriptions())));
+router.post("/accounts/subscriptions", sec, A(async (req, res) => { const s = await acct.createSubscription(req.body || {}, req.admin.email); await logAudit(req.admin.email, "accounts.subscription.create", s.id, { name: s.name }); ok(res, { subscription: s }); }));
+router.post("/accounts/subscriptions/:id", sec, A(async (req, res) => { const s = await acct.updateSubscription(req.params.id, req.body || {}); if (!s) return notFound(res, "not found"); await logAudit(req.admin.email, "accounts.subscription.update", s.id, req.body?.status ? { status: req.body.status } : {}); ok(res, { subscription: s }); }));
+router.post("/accounts/subscriptions/:id/renew", sec, A(async (req, res) => { const r = await acct.renewSubscription(req.params.id, req.body || {}, req.admin.email); if (!r) return notFound(res, "not found"); await logAudit(req.admin.email, "accounts.subscription.renew", req.params.id, { amountInr: r.expense.amountInr }); ok(res, r); }));
+router.post("/accounts/reminders/run", sec, A(async (req, res) => ok(res, await acct.runRenewalReminders())));
+router.get("/accounts/client-invoices", sec, A(async (req, res) => ok(res, await acct.listClientInvoices(req.query))));
+router.post("/accounts/client-invoices", sec, A(async (req, res) => { const i = await acct.createClientInvoice(req.body || {}, req.admin.email); await logAudit(req.admin.email, "accounts.invoice.create", i.id, { number: i.number, total: i.total }); ok(res, { invoice: i }); }));
+router.post("/accounts/client-invoices/:id", sec, A(async (req, res) => { const i = await acct.updateClientInvoice(req.params.id, req.body || {}); if (!i) return notFound(res, "not found"); await logAudit(req.admin.email, "accounts.invoice.update", i.id, {}); ok(res, { invoice: i }); }));
+router.post("/accounts/client-invoices/:id/status", sec, A(async (req, res) => { const i = await acct.setClientInvoiceStatus(req.params.id, req.body || {}, req.admin.email); if (!i) return notFound(res, "not found"); await logAudit(req.admin.email, "accounts.invoice.status", i.id, { status: i.status }); ok(res, { invoice: i }); }));
+router.get("/accounts/client-invoices/:id/pdf", sec, A(async (req, res) => {
+  const inv = await acct.getClientInvoice(req.params.id);
+  if (!inv) return notFound(res, "not found");
+  sendFile(res, await clientInvoicePdf(inv, await acct.getSettings()), "application/pdf", `${safeFile(inv.number)}.pdf`);
+}));
+router.get("/accounts/koin-invoices", sec, A(async (req, res) => ok(res, await acct.listKoinInvoices(req.query))));
+router.post("/accounts/koin-invoices/backfill", sec, A(async (req, res) => { const r = await acct.backfillKoinInvoiceNumbers(); await logAudit(req.admin.email, "accounts.koin_invoices.backfill", "coin_orders", r); ok(res, r); }));
+router.get("/accounts/koin-invoices/:orderId/pdf", sec, A(async (req, res) => {
+  const d = await acct.getKoinInvoiceData(req.params.orderId);
+  if (!d) return notFound(res, "no paid order with that id");
+  sendFile(res, await koinInvoicePdf(d), "application/pdf", `${safeFile(d.order.invoiceNo)}.pdf`);
+}));
+router.post("/accounts/attachments", sec, A(async (req, res) => ok(res, { attachment: await acct.uploadAttachment(req) })));
+router.get("/accounts/attachments/url", sec, A(async (req, res) => ok(res, { url: await acct.attachmentUrl(req.query.key) })));
+router.get("/accounts/export", sec, A(async (req, res) => {
+  const type = String(req.query.type || "ledger");
+  const body = await acct.exportCsv(type, req.query, { excludedUserIds: await excludedUserIds() });
+  sendFile(res, body, "text/csv; charset=utf-8", `kynq-${safeFile(type)}-${req.query.from || "all"}-${req.query.to || "now"}.csv`);
+}));
+
 router.get("/creators", requireSection("creators"), guard(async (req, res) => ok(res, await creatorsOverview(rangeFromQuery(req.query)))));
 router.post("/creators", requireSection("creators"), guard(async (req, res) => {
   try {
