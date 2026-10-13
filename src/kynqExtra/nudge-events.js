@@ -10,15 +10,15 @@
 //             girls-only pitch, or "<deck>:<level>" for questions ("mixed:2"); may be null
 //   event   — "shown" | "accepted" | "dismissed" | "timeout" | "busy"
 //   action  — on accepted: "start" (game), "deck" (opened filters), "unlock"
-//             (bought the lens in the card), "gender" (girls only), "answered" /
-//             "skip" (question); otherwise null
+//             (bought the lens in the card), "gender" (girls only), "picked" /
+//             "skip" (question; "answered" on older rows); otherwise null
 //   at      — ms epoch
 import mongoose from "mongoose";
 
 export const NUDGE_EVENTS = "nudge_events";
 export const NUDGE_KINDS = ["premium", "games", "effects", "question"];
 export const NUDGE_OUTCOMES = ["shown", "accepted", "dismissed", "timeout", "busy"];
-const ACTIONS = ["start", "deck", "unlock", "gender", "answered", "skip"];
+const ACTIONS = ["start", "deck", "unlock", "gender", "answered", "picked", "skip"];
 
 const coll = () => mongoose.connection.collection(NUDGE_EVENTS);
 const clean = (v, max = 48) => (typeof v === "string" && v ? v.slice(0, max) : null);

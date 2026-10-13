@@ -27,7 +27,7 @@ import { startMeter, markConnected, pauseMeter, endMeter, onReward, ensureChatMe
 import { ensureDemoAccountIndexes, warmDemoBackoff, DEMO_MATCH_ENABLED } from "./demo-accounts.js";
 import { ensureBlockIndexes } from "./blocks.js";
 import { ensureCallsIndexes } from "./calls-store.js";
-import { startPairQuestions, stopPairQuestions, answerPairQuestion, skipPairQuestion } from "./pair-question-live.js";
+import { startPairQuestions, stopPairQuestions, pickPairAnswer, skipPairQuestion } from "./pair-question-live.js";
 import { recordNudgeEvent, ensureNudgeEventIndexes } from "./nudge-events.js";
 
 // scopedId -> Set<socketId>, so REST routes (friend requests, DMs) can push
@@ -323,9 +323,10 @@ export function initSignaling(server) {
       if (!callId || callId !== socket.data.currentCallId || !socket.data.peerScopedId) return;
       startPairQuestions(io, callId, scopedId, socket.data.peerScopedId);
     });
-    socket.on("question:answer", async ({ callId, qid } = {}, ack) => {
+    socket.on("question:pick", async ({ callId, qid, choice } = {}, ack) => {
       if (!callId || callId !== socket.data.currentCallId) return ack?.({ ok: false });
-      const r = await answerPairQuestion(io, callId, qid, [scopedId, socket.data.peerScopedId].filter(Boolean)).catch(() => ({ ok: false, paid: [] }));
+      const who = { scopedId, userId: socket.data.userId };
+      const r = await pickPairAnswer(io, callId, qid, choice, who, [scopedId, socket.data.peerScopedId].filter(Boolean)).catch(() => ({ ok: false, paid: [] }));
       for (const p of r.paid) emitToUser(p.userId, "wallet:updated", { earned: p.amount, reason: "question" });
       ack?.({ ok: r.ok });
     });

@@ -1,12 +1,14 @@
 // "Question for you two": a shared question card both people see at the same
-// moment, answered out loud. It starts light and gets deeper as the call goes
+// moment. Each person picks one of the choices privately; when both have
+// picked, both picks are revealed to both screens and they talk about why. It starts light and gets deeper as the call goes
 // on (or as they answer), so two strangers end up actually knowing each other.
 //
 // Server-timed, in memory, one entry per live call (same single-process
 // assumption as the matchmaker). The deck comes from the pair's self-declared
 // genders; neither client is ever told the other's gender — they only get the
-// question text. Answering `ECONOMY.questions.rewardAfter` together pays both
-// people once per call, capped per day.
+// question. Answering `ECONOMY.questions.rewardAfter` together (both picked)
+// pays both people once per call, capped per day. Every revealed answer is
+// stored in `pair_question_answers` for the admin Nudges page.
 import crypto from "crypto";
 import mongoose from "mongoose";
 import { findUserById } from "../gift/session.js";
@@ -22,6 +24,8 @@ const LEVEL_EVERY_MS = 180_000 * SCALE; // time alone also deepens the questions
 const DAY_MS = 86_400_000;
 
 const live = new Map(); // callId -> state
+export const PAIR_ANSWERS = "pair_question_answers";
+const answers = () => mongoose.connection.collection(PAIR_ANSWERS);
 
 async function deckFor(a, b) {
   const [ua, ub] = await Promise.all([findUserById(a), findUserById(b)]);
@@ -46,11 +50,12 @@ function show(io, callId, level) {
   if (!st) return;
   if (!io.sockets.adapter.rooms.get(callId)) { stopPairQuestions(callId); return; } // call is gone
   const lvl = level ?? levelOf(st);
-  const text = pickPairQuestion(st.deck, lvl, st.asked);
+  const { q: text, options } = pickPairQuestion(st.deck, lvl, st.asked);
   st.asked.add(text);
-  st.current = { qid: crypto.randomUUID().slice(0, 8), text, level: lvl, variant: `${st.deck}:${lvl}` };
+  st.current = { qid: crypto.randomUUID().slice(0, 8), text, options, level: lvl, variant: `${st.deck}:${lvl}`, picks: new Map(), revealed: false };
+  const { picks: _p, revealed: _r, ...pub } = st.current;
   io.to(callId).emit("question:show", {
-    ...st.current,
+    ...pub,
     answered: st.answered,
     rewardAfter: ECONOMY.questions.rewardAfter,
     reward: st.rewarded ? 0 : ECONOMY.questions.reward,
@@ -79,16 +84,39 @@ async function rewardedToday(userId) {
 }
 
 /**
- * Either person tapping "We answered" counts for both (it's a shared moment).
+ * One person's pick (index into the options). Picks are locked once made and
+ * stay hidden until both have picked; then both screens get both picks.
+ * `who` = { scopedId, userId } from the authenticated socket.
  * Resolves to { ok, paid: [{ userId, amount }] } — the caller notifies wallets.
  */
-export async function answerPairQuestion(io, callId, qid, participants) {
+export async function pickPairAnswer(io, callId, qid, choice, who, participants) {
   const st = live.get(callId);
-  if (!st?.current || st.current.qid !== qid) return { ok: false, paid: [] };
-  st.current = null;
+  const cur = st?.current;
+  const i = Number(choice);
+  if (!cur || cur.qid !== qid || cur.revealed || !Number.isInteger(i) || i < 0 || i >= cur.options.length) return { ok: false, paid: [] };
+  if (cur.picks.has(who.scopedId)) return { ok: true, paid: [] };
+  cur.picks.set(who.scopedId, { choice: i, userId: who.userId ?? null });
+
+  // Tell each screen what it needs: its own pick, and only *whether* the other side has picked.
+  const sockets = await io.in(callId).fetchSockets();
+  if (cur.picks.size < 2) {
+    for (const s of sockets) s.emit("question:progress", { qid, you: cur.picks.get(s.data.scopedId)?.choice ?? null, themPicked: [...cur.picks.keys()].some((k) => k !== s.data.scopedId) });
+    return { ok: true, paid: [] };
+  }
+
+  cur.revealed = true;
   st.answered += 1;
-  io.to(callId).emit("question:answered", { qid, answered: st.answered });
+  const [[aId, a], [bId, b]] = [...cur.picks.entries()];
+  for (const s of sockets) {
+    const mine = s.data.scopedId === aId ? a : b, theirs = s.data.scopedId === aId ? b : a;
+    s.emit("question:reveal", { qid, you: mine.choice, them: theirs.choice, answered: st.answered });
+  }
   schedule(io, callId, AFTER_ANSWER_MS);
+  answers().insertOne({
+    callId, qid, deck: st.deck, level: cur.level, text: cur.text, options: cur.options,
+    picks: [{ userId: a.userId, choice: a.choice }, { userId: b.userId, choice: b.choice }],
+    match: a.choice === b.choice, at: Date.now(),
+  }).catch((err) => console.error("[questions] save answer failed:", err.message));
 
   const paid = [];
   if (!st.rewarded && st.answered >= ECONOMY.questions.rewardAfter) {
@@ -102,11 +130,19 @@ export async function answerPairQuestion(io, callId, qid, participants) {
   return { ok: true, paid };
 }
 
-/** A different question at the same depth, right away. Throttled so two fast tappers don't race. */
+/**
+ * Skip (before both picked): a different question at the same depth. Next
+ * (after the reveal): the next question, deeper if they've earned it.
+ * Throttled so two fast tappers don't race.
+ */
 export function skipPairQuestion(io, callId, qid) {
   const st = live.get(callId);
   if (!st?.current || st.current.qid !== qid || Date.now() - st.lastSkipAt < 1500) return false;
   st.lastSkipAt = Date.now();
-  show(io, callId, st.current.level);
+  show(io, callId, st.current.revealed ? undefined : st.current.level);
   return true;
+}
+
+export async function ensurePairAnswerIndexes() {
+  await Promise.all([answers().createIndex({ at: -1 }), answers().createIndex({ "picks.userId": 1, at: -1 })]);
 }

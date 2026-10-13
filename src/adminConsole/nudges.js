@@ -4,6 +4,7 @@
 // left out of every rate — the person never really had a chance to answer.
 import { col, cached, dayKeys, dayExpr, fillSeries, usersById, displayName } from "./util.js";
 import { NUDGE_EVENTS, ensureNudgeEventIndexes } from "../kynqExtra/nudge-events.js";
+import { PAIR_ANSWERS, ensurePairAnswerIndexes } from "../kynqExtra/pair-question-live.js";
 
 const TTL = 60_000;
 const ATTRIBUTION_MS = 3 * 60_000;
@@ -14,7 +15,7 @@ const rate = (n, d) => (d > 0 ? Math.round((n / d) * 1000) / 1000 : 0);
 const nudges = () => col(NUDGE_EVENTS);
 
 let indexesReady = null;
-const ensureIndexes = () => (indexesReady ??= ensureNudgeEventIndexes().catch((err) => { indexesReady = null; console.error("[console] nudge index creation failed:", err.message); }));
+const ensureIndexes = () => (indexesReady ??= Promise.all([ensureNudgeEventIndexes(), ensurePairAnswerIndexes()]).catch((err) => { indexesReady = null; console.error("[console] nudge index creation failed:", err.message); }));
 
 const countsOf = (rows) => {
   const c = { shown: 0, accepted: 0, dismissed: 0, timeout: 0 };
@@ -87,9 +88,11 @@ export function nudgeStats({ days, from, to }) {
       },
     ]).toArray();
 
-    const [recentRows, koins] = await Promise.all([
+    const [recentRows, koins, answerRows, answerTotals] = await Promise.all([
       nudges().find({ ...inRange, event: { $in: ["accepted", "dismissed"] } }, { projection: { _id: 0, userId: 1, kind: 1, variant: 1, event: 1, action: 1, at: 1 } }).sort({ at: -1 }).limit(50).toArray(),
       koinsFromNudges(from, to),
+      col(PAIR_ANSWERS).find(inRange, { projection: { _id: 0, qid: 1, deck: 1, level: 1, text: 1, options: 1, picks: 1, match: 1, at: 1 } }).sort({ at: -1 }).limit(50).toArray(),
+      col(PAIR_ANSWERS).aggregate([{ $match: inRange }, { $group: { _id: null, answered: { $sum: 1 }, matched: { $sum: { $cond: ["$match", 1, 0] } } } }]).toArray(),
     ]);
 
     // Totals and per-kind rows from one group.
@@ -106,7 +109,7 @@ export function nudgeStats({ days, from, to }) {
     for (const r of facets.perDay) (r._id.event === "shown" ? shownByDay : acceptedByDay).set(r._id.date, r.count);
     const perDay = fillSeries(dayKeys(from, to), shownByDay, (date, shown) => ({ date, shown: shown ?? 0, accepted: acceptedByDay.get(date) ?? 0 }));
 
-    const people = await usersById([...recentRows.map((r) => r.userId), ...facets.topClickers.map((r) => r._id)]);
+    const people = await usersById([...recentRows.map((r) => r.userId), ...facets.topClickers.map((r) => r._id), ...answerRows.flatMap((r) => r.picks.map((p) => p.userId).filter(Boolean))]);
     const who = (id) => ({ id, name: displayName(people.get(id)) });
 
     return {
@@ -125,10 +128,20 @@ export function nudgeStats({ days, from, to }) {
       koins,
       recent: recentRows.map((r) => ({ at: r.at, user: who(r.userId), kind: r.kind, variant: r.variant ?? null, event: r.event, action: r.action ?? null })),
       topClickers: facets.topClickers.map((r) => ({ user: who(r._id), shown: r.shown, accepted: r.accepted })),
+      // "Question for you two": what each person in the call actually picked.
+      questions: {
+        answered: answerTotals[0]?.answered ?? 0,
+        matched: answerTotals[0]?.matched ?? 0,
+        recent: answerRows.map((r) => ({
+          at: r.at, qid: r.qid, deck: r.deck, level: r.level, question: r.text, match: r.match,
+          picks: r.picks.map((p) => ({ user: p.userId ? who(p.userId) : null, answer: r.options[p.choice] ?? null })),
+        })),
+      },
       notes: [
         "Koins from nudges counts Koins spent on a lens unlock, a girls-only pass or a game fee within 3 minutes after someone clicked the matching nudge. Refunds are not taken off.",
         "Nudges hidden because the person opened a panel themselves are left out of every rate.",
         "Expired means the nudge timed out with no answer.",
+        "Question answers are recorded by the server only when both people in the call picked, so each row shows both real picks.",
       ],
     };
   });
