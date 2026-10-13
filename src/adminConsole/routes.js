@@ -23,6 +23,7 @@ import { traffic, realtime } from "./ga.js";
 import { seo } from "./seo.js";
 import { nudgeStats } from "./nudges.js";
 import { tasksRouter } from "./tasks/routes.js";
+import { clearRosterCache } from "./tasks/team.js";
 import { listVideos, uploadVideo, deleteVideo, rebalance } from "./videos.js";
 
 const router = express.Router();
@@ -229,11 +230,13 @@ router.post("/team", requireOwner, guard(async (req, res) => {
   if (!email.includes("@")) return badRequest(res, "a valid email is required");
   if (!Array.isArray(req.body?.allowedSections) || req.body.allowedSections.length === 0) return badRequest(res, "pick at least one section");
   const doc = await upsertSubadmin(email, req.body?.name, req.body.allowedSections, req.admin);
+  clearRosterCache(); // Tasks assignees come from this list: make a new teammate assignable right away
   await logAudit(req.admin.email, "subadmin.upsert", doc.email, { allowedSections: doc.allowedSections });
   ok(res, { subadmin: doc });
 }));
 router.post("/team/:email/revoke", requireOwner, guard(async (req, res) => {
   const doc = await revokeSubadmin(req.params.email, req.admin);
+  clearRosterCache();
   if (!doc) return notFound(res, "subadmin not found");
   await logAudit(req.admin.email, "subadmin.revoke", doc.email, {});
   ok(res, { subadmin: doc });
