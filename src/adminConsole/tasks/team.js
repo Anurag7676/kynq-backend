@@ -8,6 +8,7 @@
 // Ticket access never grants other admin sections; those still come from allowedSections.
 import { adminEmails } from "../auth.js";
 import { listSubadmins } from "../subadmins.js";
+import { col } from "../util.js";
 
 export class TaskError extends Error { constructor(message, code = "bad_request") { super(message); this.code = code; } }
 export const forbid = (m) => { throw new TaskError(m, "forbidden"); };
@@ -19,14 +20,28 @@ export const isOwner = (admin) => admin?.role === "owner";
 
 const nameFromEmail = (email) => email.split("@")[0].replace(/[._-]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 
+// Owners aren't stored anywhere (they come from ADMIN_EMAILS), so their display name is the
+// Google profile name remembered at their last Google sign-in; until then, it's derived from
+// the email address.
+const PROFILES = "admin_profiles";
+export async function rememberOwnerName(admin, name) {
+  const clean = typeof name === "string" ? name.trim().slice(0, 80) : "";
+  if (admin?.role !== "owner" || !clean) return;
+  try {
+    await col(PROFILES).updateOne({ email: admin.email }, { $set: { email: admin.email, name: clean, updatedAt: Date.now() } }, { upsert: true });
+    clearRosterCache();
+  } catch (err) { console.error("[tasks] remember owner name failed:", err.message); }
+}
+
 let cache = { at: 0, list: null };
 /** [{ email, name, isOwner }] — owners first. Cached for 30s (it's read on most requests). */
 export async function roster() {
   if (cache.list && Date.now() - cache.at < 30_000) return cache.list;
   const owners = adminEmails();
-  const subs = await listSubadmins();
+  const [subs, profiles] = await Promise.all([listSubadmins(), col(PROFILES).find({ email: { $in: owners } }).toArray().catch(() => [])]);
+  const ownerName = new Map(profiles.map((p) => [p.email, p.name]));
   const list = [
-    ...owners.map((email) => ({ email, name: nameFromEmail(email), isOwner: true })),
+    ...owners.map((email) => ({ email, name: ownerName.get(email) || nameFromEmail(email), isOwner: true })),
     ...subs.filter((s) => !owners.includes(s.email)).map((s) => ({ email: s.email, name: s.name?.trim() || nameFromEmail(s.email), isOwner: false })),
   ];
   cache = { at: Date.now(), list };

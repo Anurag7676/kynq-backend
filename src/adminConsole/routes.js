@@ -23,7 +23,7 @@ import { traffic, realtime } from "./ga.js";
 import { seo } from "./seo.js";
 import { nudgeStats } from "./nudges.js";
 import { tasksRouter } from "./tasks/routes.js";
-import { clearRosterCache } from "./tasks/team.js";
+import { clearRosterCache, rememberOwnerName } from "./tasks/team.js";
 import { listVideos, uploadVideo, deleteVideo, rebalance } from "./videos.js";
 
 const router = express.Router();
@@ -47,6 +47,7 @@ router.post("/auth/google", guard(async (req, res) => {
   const admin = await resolveAdmin(who.email, who.name);
   if (!admin) return res.status(403).json({ error: "not_allowed", message: "This Google account isn't on the admin list." });
   startSession(res, who);
+  await rememberOwnerName(admin, who.name);
   await logAudit(who.email, "auth.login", null);
   ok(res, { admin });
 }));
