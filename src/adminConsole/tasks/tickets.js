@@ -295,6 +295,18 @@ export async function bulkUpdate(body, admin) {
   return { updated: results.filter((r) => r.ok).length, results };
 }
 
+/** Bulk delete. Each ticket goes through deleteTicket's own check (founder or creator). */
+export async function bulkDelete(body, admin) {
+  const ids = Array.isArray(body?.ids) ? [...new Set(body.ids.map(String))].slice(0, 200) : [];
+  if (!ids.length) bad("pick at least one ticket");
+  const results = [];
+  for (const id of ids) {
+    try { const r = await deleteTicket(id, admin); results.push({ id, key: r.key, ok: true }); }
+    catch (err) { results.push({ id, ok: false, error: err.message }); }
+  }
+  return { deleted: results.filter((r) => r.ok).length, results };
+}
+
 // ─── Comments ───
 function publicComment(c, admin) {
   const deleted = !!c.deletedAt;

@@ -158,6 +158,17 @@ test("10-11: JSON import — validation, unknown assignees, confirm, idempotent,
   assert.ok(board.items.some((t) => t.key === r.created[1].key), "assignee sees imported ticket");
 });
 
+test("bulk delete: founder or creator only, per ticket", db, async () => {
+  const a = await tk.createTicket({ title: "Bulk A" }, FOUNDER);
+  const b = await tk.createTicket({ title: "Bulk B (dev's own)" }, DEV);
+  const r1 = await tk.bulkDelete({ ids: [a.id, b.id] }, DEV);
+  assert.equal(r1.deleted, 1, "dev can only delete their own"); // a isn't visible to dev → not found
+  assert.ok(r1.results.find((x) => x.id === a.id && !x.ok));
+  const r2 = await tk.bulkDelete({ ids: [a.key] }, FOUNDER);
+  assert.equal(r2.deleted, 1);
+  await rejects(tk.getTicket(a.key, FOUNDER), "not_found");
+});
+
 test("deadline reminders run once per ticket per due date", db, async () => {
   const late = await tk.createTicket({ title: "Late thing", owner: DEV.email, dueDate: addDays(today(), -2) }, FOUNDER);
   await nt.createDeadlineReminders(); await nt.createDeadlineReminders();

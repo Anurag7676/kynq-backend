@@ -30,6 +30,7 @@ tasksRouter.get("/overview", handle((req) => tk.overview(req.admin)));
 tasksRouter.get("/tickets", handle((req) => tk.listTickets(req.query, req.admin)));
 tasksRouter.post("/tickets", writes, handle(async (req) => ({ ticket: await tk.createTicket(req.body, req.admin) })));
 tasksRouter.post("/tickets/bulk", writes, handle((req) => tk.bulkUpdate(req.body, req.admin)));
+tasksRouter.post("/tickets/bulk-delete", writes, handle((req) => tk.bulkDelete(req.body, req.admin)));
 tasksRouter.get("/tickets/import/template", handle(() => ({ example: tk.IMPORT_EXAMPLE, limits: tk.IMPORT_LIMITS })));
 tasksRouter.post("/tickets/import/preview", imports, handle((req) => tk.previewImport(req.body, req.admin)));
 tasksRouter.post("/tickets/import", imports, handle((req) => tk.commitImport(req.body, req.admin)));
