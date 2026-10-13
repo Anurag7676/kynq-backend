@@ -17,7 +17,8 @@ import { col } from "../util.js";
 import { logAudit } from "../audit.js";
 import { roster, resolveMember, isOwner, forbid, bad, missing, conflict } from "./team.js";
 import { notify } from "./notify.js";
-import { TICKETS, COMMENTS, COUNTERS, IMPORTS, STATUSES, OPEN_STATUSES, PRIORITIES, KEY_PREFIX, today, weekStartTs, strip } from "./store.js";
+import { assignableSprint, sprintMove, activeSprint, activeSummary } from "./sprints.js";
+import { TICKETS, COMMENTS, COUNTERS, IMPORTS, SPRINTS, STATUSES, OPEN_STATUSES, PRIORITIES, KEY_PREFIX, today, weekStartTs, strip } from "./store.js";
 
 export { STATUSES, OPEN_STATUSES, PRIORITIES };
 export const IMPORT_LIMITS = { maxTickets: 100, maxBytes: 200_000 };
@@ -61,6 +62,9 @@ export async function migrate() {
   await col(TICKETS).updateMany({ blocked: { $exists: false } }, { $set: { blocked: false } });
   await col(TICKETS).updateMany({ version: { $exists: false } }, { $set: { version: 0 } });
   await col(TICKETS).updateMany({ history: { $exists: false } }, { $set: { history: [] } });
+  // Sprints: "backlog" used to be a status; now the backlog is "not in a sprint".
+  await col(TICKETS).updateMany({ status: "backlog" }, { $set: { status: "todo" } });
+  await col(TICKETS).updateMany({ sprintId: { $exists: false } }, { $set: { sprintId: null, sprints: [] } });
   const unkeyed = await col(TICKETS).find({ key: { $exists: false } }, { projection: { id: 1 } }).sort({ createdAt: 1 }).toArray();
   if (unkeyed.length) {
     const first = await reserveKeys(unkeyed.length);
@@ -107,7 +111,10 @@ export function cleanTicketFields(b, partial) {
   if (!partial || has("title")) out.title = str(b.title, 200, "title", true);
   if (has("description")) out.description = str(b.description, 10_000, "description");
   if (!partial || has("priority")) { const p = b.priority ?? "medium"; if (!PRIORITIES.includes(p)) bad(`priority must be one of ${PRIORITIES.join(", ")}`); out.priority = p; }
-  if (has("status")) { if (!STATUSES.includes(b.status)) bad(`status must be one of ${STATUSES.join(", ")}`); out.status = b.status; }
+  if (has("status")) {
+    const st = b.status === "backlog" ? "todo" : b.status; // old status name: the backlog is now "not in a sprint"
+    if (!STATUSES.includes(st)) bad(`status must be one of ${STATUSES.join(", ")}`); out.status = st;
+  }
   if (has("dueDate")) { if (b.dueDate !== null && b.dueDate !== "" && !isDay(b.dueDate)) bad("dueDate must be YYYY-MM-DD"); out.dueDate = b.dueDate || null; }
   if (has("labels")) out.labels = cleanLabels(b.labels);
   if (has("blocked")) out.blocked = !!b.blocked;
@@ -117,12 +124,13 @@ export function cleanTicketFields(b, partial) {
 
 // ─── Create / read / update / delete ───
 function newTicketDoc(fields, { owner, createdBy, key, now }) {
-  const status = fields.status ?? (owner ? "todo" : "backlog");
+  const status = fields.status ?? "todo";
   return {
     id: `tsk_${crypto.randomBytes(6).toString("hex")}`, key,
     title: fields.title, description: fields.description ?? null,
     owner: owner ?? null, priority: fields.priority ?? "medium", status,
     dueDate: fields.dueDate ?? null, labels: fields.labels ?? [], attachments: [], watchers: [],
+    sprintId: fields.sprintId ?? null, sprints: fields.sprintId ? [{ id: fields.sprintId, addedAt: now, removedAt: null, result: null }] : [],
     blocked: false, blockerReason: null,
     createdBy, createdAt: now, updatedAt: now, completedAt: status === "done" ? now : null, version: 0,
     history: [{ at: now, by: createdBy, type: "created" }],
@@ -136,6 +144,10 @@ export async function createTicket(body, admin) {
   const requested = b.owner === undefined ? admin.email : b.owner;
   const owner = requested === null || requested === "" ? null : await resolveMember(requested);
   if (!isOwner(admin) && owner !== admin.email) forbid("Only the founder can assign tickets to someone else.");
+  if (b.sprintId) {
+    if (!isOwner(admin)) forbid("Only the founder plans sprints.");
+    fields.sprintId = (await assignableSprint(b.sprintId)).id;
+  }
   const doc = newTicketDoc(fields, { owner, createdBy: admin.email, key: `${KEY_PREFIX}-${await reserveKeys(1)}`, now: Date.now() });
   await col(TICKETS).insertOne(doc);
   await logAudit(admin.email, "tasks.ticket.create", doc.key, { owner, title: doc.title });
@@ -184,6 +196,14 @@ export async function updateTicket(idOrKey, body, admin) {
     const team = await roster();
     set.watchers = [...new Set(await Promise.all(b.watchers.map((w) => resolveMember(w, team))))];
   }
+  let sprintPart = null, sprintEvent = null;
+  if (b.sprintId !== undefined && (b.sprintId || null) !== (t.sprintId ?? null)) {
+    if (!isOwner(admin)) forbid("Only the founder plans sprints.");
+    const target = await assignableSprint(b.sprintId || null);
+    sprintPart = sprintMove(t, target?.id ?? null, Date.now());
+    const from = t.sprintId ? (await col(SPRINTS).findOne({ id: t.sprintId }))?.name ?? "a sprint" : "Backlog";
+    sprintEvent = { type: "sprint", from, to: target?.name ?? "Backlog" };
+  }
   for (const k of ["priority", "dueDate"]) if (set[k] !== undefined && !same(set[k], t[k]) && !canPlan(t, admin)) forbid("Only the founder can change the priority or due date of this ticket.");
   if (set.blocked === true && !(set.blockerReason ?? t.blockerReason)) bad("say what's blocking it");
   if (set.blocked === false && b.blockerReason === undefined) set.blockerReason = null;
@@ -194,8 +214,10 @@ export async function updateTicket(idOrKey, body, admin) {
     if (set[k] === undefined || same(set[k], t[k] ?? (k === "labels" || k === "watchers" ? [] : null))) continue;
     events.push({ at: now, by: admin.email, type: k === "owner" ? "assigned" : k === "watchers" ? "shared" : k, field: label, from: t[k] ?? null, to: set[k], ...(k === "blocked" && set[k] ? { text: set.blockerReason ?? t.blockerReason } : {}) });
   }
+  if (sprintEvent) events.push({ at: now, by: admin.email, ...sprintEvent });
   const edited = ["title", "description"].filter((k) => set[k] !== undefined && !same(set[k], t[k]));
   if (edited.length) events.push({ at: now, by: admin.email, type: "edited", text: edited.join(", ") });
+  if (sprintPart) Object.assign(set, sprintPart);
   if (!events.length && Object.keys(set).every((k) => same(set[k], t[k]))) return getTicket(t.id, admin);
 
   const version = (t.version ?? 0) + 1;
@@ -246,6 +268,9 @@ export async function listTickets(query = {}, admin) {
   const pr = String(query.priority ?? "").split(",").filter((p) => PRIORITIES.includes(p));
   if (pr.length) and.push({ priority: { $in: pr } });
   if (query.label) and.push({ labels: String(query.label).toLowerCase() });
+  if (query.sprint === "none" || query.sprint === "backlog") and.push({ sprintId: null });
+  else if (query.sprint === "active") { const a = await activeSprint(); and.push({ sprintId: a?.id ?? "__none__" }); }
+  else if (query.sprint) and.push({ sprintId: String(query.sprint) });
   const open = { status: { $in: OPEN_STATUSES } };
   const flags = {
     overdue: { ...open, dueDate: { $lt: d, $ne: null } },
@@ -375,7 +400,7 @@ export const IMPORT_EXAMPLE = {
     { title: "Publish 5 Instagram reels", description: "Prepare and publish 5 reels for KYNQ.", assigneeEmail: "marketing@example.com", priority: "high", status: "todo", labels: ["marketing", "content"] },
   ],
 };
-const ALLOWED_IMPORT_KEYS = new Set(["title", "description", "assigneeEmail", "assignee", "priority", "status", "dueDate", "labels"]);
+const ALLOWED_IMPORT_KEYS = new Set(["title", "description", "assigneeEmail", "assignee", "priority", "status", "dueDate", "labels", "sprint"]);
 
 /** Validates every row without writing anything. */
 export async function previewImport(body, admin) {
@@ -387,6 +412,14 @@ export async function previewImport(body, admin) {
   if (!Array.isArray(tickets) || !tickets.length) bad('expected {"tickets": [ ... ]} with at least one ticket');
   if (tickets.length > IMPORT_LIMITS.maxTickets) bad(`max ${IMPORT_LIMITS.maxTickets} tickets per import`);
   const team = await roster();
+  // "sprint": "active" (the running sprint), "backlog", or a sprint name/number ("Sprint 3", 3).
+  const open = await col(SPRINTS).find({ status: { $in: ["planned", "active"] } }, { projection: { id: 1, name: 1, number: 1, status: 1 } }).toArray();
+  const resolveSprint = (v) => {
+    if (v == null || v === "" || v === "backlog") return { id: null };
+    if (v === "active" || v === "current") { const a = open.find((s) => s.status === "active"); return a ? { id: a.id, name: a.name } : { error: "there's no active sprint" }; }
+    const hit = open.find((s) => String(s.number) === String(v).replace(/^sprint\s*/i, "") || s.name.toLowerCase() === String(v).toLowerCase());
+    return hit ? { id: hit.id, name: hit.name } : { error: `sprint "${v}" isn't planned or active` };
+  };
   const seen = new Map();
   const rows = tickets.map((t, index) => {
     const errors = [];
@@ -401,10 +434,12 @@ export async function previewImport(body, admin) {
       const hit = team.find((m) => m.email === r) ?? team.find((m) => m.email.split("@")[0] === r);
       if (hit) owner = hit.email; else { unknownAssignee = String(ref); errors.push(`"${ref}" isn't on the team (Admin → Team)`); }
     }
+    const sp = resolveSprint(t.sprint);
+    if (sp.error) errors.push(sp.error);
     const dupKey = String(t.title ?? "").trim().toLowerCase();
     if (dupKey && seen.has(dupKey)) errors.push(`same title as ticket #${seen.get(dupKey) + 1} in this import`);
     else if (dupKey) seen.set(dupKey, index);
-    return { index, ok: !errors.length, errors, ticket: fields ? { ...fields, assignee: owner } : null, unknownAssignee };
+    return { index, ok: !errors.length, errors, ticket: fields ? { ...fields, assignee: owner, sprintId: sp.id ?? null, sprintName: sp.name ?? null } : null, unknownAssignee };
   });
   return { valid: rows.every((r) => r.ok), count: rows.length, errors: rows.filter((r) => !r.ok).length, rows, idempotencyKey: typeof raw.idempotencyKey === "string" ? raw.idempotencyKey : null };
 }
@@ -432,7 +467,7 @@ export async function commitImport(body, admin) {
     const first = await reserveKeys(preview.rows.length);
     const now = Date.now();
     const docs = preview.rows.map((r, i) => {
-      const { assignee, ...fields } = r.ticket;
+      const { assignee, sprintName: _sn, ...fields } = r.ticket;
       const d = newTicketDoc(fields, { owner: assignee, createdBy: admin.email, key: `${KEY_PREFIX}-${first + i}`, now });
       d.history = [{ at: now, by: admin.email, type: "created", text: "imported from JSON" }];
       d.importKey = key;
@@ -480,6 +515,7 @@ export async function overview(admin) {
   const sortMine = mine.sort((a, b) => (a.dueDate ?? "9999").localeCompare(b.dueDate ?? "9999") || PRIORITIES.indexOf(a.priority) - PRIORITIES.indexOf(b.priority));
   return {
     today: d,
+    sprint: await activeSummary(),
     counts: { open: openN, progress, overdue, blocked, review, doneWeek },
     mine: sortMine.slice(0, 12).map(strip).map((t) => ({ ...t, overdue: !!t.dueDate && t.dueDate < d })),
     mineTotal: mine.length,

@@ -6,6 +6,7 @@ import { roster, rateLimit, isOwner } from "./team.js";
 import * as tk from "./tickets.js";
 import * as nt from "./notify.js";
 import { uploadTicketFile, ticketFileUrl } from "./files.js";
+import * as sp from "./sprints.js";
 
 const STATUS = { forbidden: 403, not_found: 404, conflict: 409, rate_limited: 429, bad_request: 400 };
 const fail = (res, status, code, message) => res.set("Cache-Control", "no-store").status(status).json({ error: code, message });
@@ -42,6 +43,15 @@ tasksRouter.post("/tickets/:id/attachments", writes, handle(async (req) => ({ ti
 tasksRouter.get("/tickets/:id/attachments/url", handle(async (req) => ({ url: await ticketFileUrl(req.params.id, String(req.query.key ?? ""), req.admin) })));
 tasksRouter.post("/comments/:id", writes, handle(async (req) => ({ comment: await tk.editComment(req.params.id, req.body, req.admin) })));
 tasksRouter.post("/comments/:id/delete", writes, handle((req) => tk.deleteComment(req.params.id, req.admin)));
+
+tasksRouter.get("/sprints", handle((req) => sp.listSprints(req.admin)));
+tasksRouter.post("/sprints", writes, handle(async (req) => ({ sprint: await sp.createSprint(req.body, req.admin) })));
+tasksRouter.post("/sprints/move", writes, handle((req) => sp.moveTickets(req.body, req.admin)));
+tasksRouter.get("/sprints/:id/report", handle((req) => sp.sprintReport(req.params.id, req.admin)));
+tasksRouter.post("/sprints/:id", writes, handle(async (req) => ({ sprint: await sp.updateSprint(req.params.id, req.body, req.admin) })));
+tasksRouter.post("/sprints/:id/start", writes, handle(async (req) => ({ sprint: await sp.startSprint(req.params.id, req.admin) })));
+tasksRouter.post("/sprints/:id/complete", writes, handle((req) => sp.completeSprint(req.params.id, req.body, req.admin)));
+tasksRouter.post("/sprints/:id/delete", writes, handle((req) => sp.deleteSprint(req.params.id, req.admin)));
 
 tasksRouter.get("/notifications", handle((req) => nt.listNotifications(req.admin, { limit: req.query.limit, before: req.query.before, unread: req.query.unread === "1" })));
 tasksRouter.post("/notifications/read", handle((req) => nt.markRead(req.admin, req.body?.ids === "all" ? "all" : req.body?.ids)));

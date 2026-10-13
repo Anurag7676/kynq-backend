@@ -10,6 +10,7 @@ import mongoose from "mongoose";
 
 const tk = await import("../src/adminConsole/tasks/tickets.js");
 const nt = await import("../src/adminConsole/tasks/notify.js");
+const sp = await import("../src/adminConsole/tasks/sprints.js");
 const { TaskError, roster, clearRosterCache } = await import("../src/adminConsole/tasks/team.js");
 const { today, addDays } = await import("../src/adminConsole/tasks/store.js");
 const { upsertSubadmin } = await import("../src/adminConsole/subadmins.js");
@@ -197,4 +198,62 @@ test("overview counts and lists", db, async () => {
   assert.equal(mine.workload, null);
   assert.ok(mine.mine.every((t) => t.owner === DEV.email));
   assert.ok((await tk.listTickets({ flag: "overdue" }, FOUNDER)).items.every((t) => t.overdue));
+});
+
+test("sprints: backlog, plan, start, mid-sprint scope, complete with carry-over, frozen report", db, async () => {
+  // Old "backlog" status maps to todo + not in a sprint.
+  const legacy = await tk.createTicket({ title: "Legacy backlog item", status: "backlog" }, FOUNDER);
+  assert.equal(legacy.status, "todo"); assert.equal(legacy.sprintId, null);
+  await rejects(sp.createSprint({}, DEV), "forbidden");
+  const s1 = await sp.createSprint({ goal: "Ship reconnect fix" }, FOUNDER);
+  assert.match(s1.name, /^Sprint \d+$/); assert.equal(s1.status, "planned");
+  const a = await tk.createTicket({ title: "S1 dev task A", owner: DEV.email }, FOUNDER);
+  const b = await tk.createTicket({ title: "S1 dev task B", owner: DEV.email, dueDate: addDays(today(), -1) }, FOUNDER);
+  const c = await tk.createTicket({ title: "S1 mkt task", owner: MKT.email }, FOUNDER);
+  await rejects(sp.moveTickets({ ids: [a.key], sprintId: s1.id }, DEV), "forbidden");
+  assert.equal((await sp.moveTickets({ ids: [a.key, b.key, c.key], sprintId: s1.id }, FOUNDER)).moved, 3);
+  assert.ok((await tk.listTickets({ sprint: "backlog" }, FOUNDER)).items.some((t) => t.key === legacy.key));
+  assert.ok(!(await tk.listTickets({ sprint: "backlog" }, FOUNDER)).items.some((t) => t.key === a.key));
+  await rejects(sp.startSprint(s1.id, DEV), "forbidden");
+  await sp.startSprint(s1.id, FOUNDER);
+  const s2 = await sp.createSprint({}, FOUNDER);
+  await rejects(sp.startSprint(s2.id, FOUNDER), "conflict"); // one active at a time
+  assert.equal((await tk.listTickets({ sprint: "active" }, FOUNDER)).total, 3);
+  // Mid-sprint: one ticket added, one done.
+  const d = await tk.createTicket({ title: "S1 added late", owner: MKT.email, sprintId: s1.id }, FOUNDER);
+  await tk.updateTicket(a.key, { status: "done" }, DEV);
+  await tk.updateTicket(c.key, { status: "done" }, MKT);
+  const live = await sp.sprintReport(s1.id, FOUNDER);
+  assert.equal(live.summary.committed, 3); assert.equal(live.summary.added, 1); assert.equal(live.summary.done, 2); assert.equal(live.frozen, false);
+  // Teammate sees only their own row and tickets.
+  const devView = await sp.sprintReport(s1.id, DEV);
+  assert.deepEqual(devView.people.map((p) => p.email), [DEV.email]);
+  assert.ok(devView.tickets.done.every((t) => t.owner === DEV.email));
+  // Complete: unfinished go to a new sprint.
+  await rejects(sp.completeSprint(s1.id, {}, DEV), "forbidden");
+  const done = await sp.completeSprint(s1.id, { moveTo: s2.id }, FOUNDER);
+  assert.equal(done.carried, 2); assert.equal(done.carriedTo.id, s2.id);
+  assert.equal((await tk.getTicket(b.key, FOUNDER)).sprintId, s2.id);
+  const rep = await sp.sprintReport(s1.id, FOUNDER);
+  assert.equal(rep.frozen, true);
+  assert.deepEqual([rep.summary.scope, rep.summary.done, rep.summary.carried, rep.summary.completion], [4, 2, 2, 50]);
+  const dev = rep.people.find((p) => p.email === DEV.email);
+  assert.deepEqual([dev.assigned, dev.done, dev.overdue, dev.carried], [2, 1, 1, 1]);
+  assert.ok(dev.flags.includes("1 overdue"));
+  // History is frozen: later changes don't rewrite the report.
+  await tk.updateTicket(b.key, { status: "done" }, DEV);
+  assert.equal((await sp.sprintReport(s1.id, FOUNDER)).summary.done, 2);
+  assert.ok((await sp.sprintReport(s1.id, FOUNDER)).trend.people.some((p) => p.email === DEV.email));
+  await rejects(sp.updateSprint(s1.id, { name: "x" }, FOUNDER), "bad_request");
+  // Import into the active sprint by name.
+  await sp.startSprint(s2.id, FOUNDER);
+  const imp = await tk.commitImport({ idempotencyKey: "sprint-import-1", tickets: [{ title: "Imported into sprint", sprint: "active", assigneeEmail: DEV.email }] }, FOUNDER);
+  assert.equal((await tk.getTicket(imp.created[0].key, FOUNDER)).sprintId, s2.id);
+  assert.equal((await tk.previewImport({ tickets: [{ title: "x", sprint: "Sprint 999" }] }, FOUNDER)).valid, false);
+  // Deleting a planned sprint sends its tickets back to the backlog.
+  const s3 = await sp.createSprint({}, FOUNDER);
+  const e = await tk.createTicket({ title: "S3 task", sprintId: s3.id }, FOUNDER);
+  await sp.deleteSprint(s3.id, FOUNDER);
+  assert.equal((await tk.getTicket(e.key, FOUNDER)).sprintId, null);
+  assert.ok((await tk.overview(FOUNDER)).sprint.name === s2.name);
 });

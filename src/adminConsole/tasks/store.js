@@ -6,9 +6,11 @@ export const COUNTERS = "fos_counters";
 export const IMPORTS = "fos_imports";
 export const NOTIFICATIONS = "task_notifications";
 export const DIGESTS = "task_digests";
+export const SPRINTS = "task_sprints";
 
-export const STATUSES = ["backlog", "todo", "in_progress", "in_review", "done", "cancelled"];
-export const OPEN_STATUSES = ["backlog", "todo", "in_progress", "in_review"];
+// "Backlog" is not a status: a ticket is in the backlog when it isn't in a sprint (sprintId null).
+export const STATUSES = ["todo", "in_progress", "in_review", "done", "cancelled"];
+export const OPEN_STATUSES = ["todo", "in_progress", "in_review"];
 export const PRIORITIES = ["urgent", "high", "medium", "low"];
 export const KEY_PREFIX = "KYNQ";
 export const DAY = 86_400_000;
