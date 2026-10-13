@@ -3,6 +3,7 @@ import app from "./app.js";
 import connectDB from "./config/dbconnection.js";
 import { initSignaling } from "./kynqExtra/signaling.js";
 import { startRenewalReminders } from "./accounting/core.js";
+import { startAmbassadorAutoApprovals } from "./kynqExtra/ambassadorAutoApprove.js";
 import { stopMatchmaker } from "./kynqExtra/matchmaker.js";
 
 dotenv.config();
@@ -19,6 +20,7 @@ const server = app.listen(PORT, () => {
 // see the plan's realtime-signaling decision (no separate process/service).
 initSignaling(server);
 startRenewalReminders(); // hourly: subscription renewal emails to admins
+startAmbassadorAutoApprovals(); // every 5 min: female applicants approved 1 hour after applying
 
 const shutdown = (signal) => {
   console.log(`\n${signal} received. Shutting down gracefully…`);

@@ -10,6 +10,7 @@ import { mergeAnonymousIntoUser } from "../merge.js";
 import { ok, badRequest, unauthorized, forbidden, tooMany, wrap } from "../http.js";
 import { attributeCampusSignup, CAMPUS_COOKIE } from "../../kynqExtra/campusLinks.js";
 import { attributeCreatorSignup, CREATOR_COOKIE } from "../../kynqExtra/creators.js";
+import { activatePendingAmbassador } from "../../kynqExtra/ambassadorAutoApprove.js";
 
 const router = express.Router();
 const users = collection("users");
@@ -105,6 +106,8 @@ router.post("/google", otpLimiter, wrap(async (req, res) => {
   if (isNew && req.cookies?.[CREATOR_COOKIE]) {
     await attributeCreatorSignup(user.id, req.cookies[CREATOR_COOKIE]).catch((err) => console.error("[creators] attribution failed for", user.id, ":", err.message));
   }
+  // Approved as an ambassador before they had an account: switch it on now.
+  await activatePendingAmbassador(user).catch((err) => console.error("[ambassador] activation failed for", user.id, ":", err.message));
   const { sessionId: anonSessionId } = getOrCreateSession(req, res);
   await mergeAnonymousIntoUser(anonSessionId, user.id);
   await signIn(res, user.id);

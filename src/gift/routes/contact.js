@@ -37,6 +37,12 @@ router.post("/", wrap(async (req, res) => {
     message: String(b.message).slice(0, 4000),
     createdAt: Date.now(),
   };
+  // Ambassador applications: self-declared gender drives auto-approval (kynqExtra/ambassadorAutoApprove.js).
+  if (record.reason === "ambassador") {
+    const g = String(b.gender ?? "").toLowerCase();
+    record.gender = ["female", "male", "other", "prefer_not_to_say"].includes(g) ? g : null;
+    record.emailLower = record.email.trim().toLowerCase();
+  }
   await messages.set(record.id, record);
 
   // Tell the team. Saving to the database alone meant nobody was ever notified, so
