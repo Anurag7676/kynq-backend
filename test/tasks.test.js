@@ -104,12 +104,14 @@ test("in review, reopen and reassign notifications", db, async () => {
 });
 
 test("12: permissions are enforced per ticket", db, async () => {
-  const secret = await tk.createTicket({ title: "Founder-only planning" }, FOUNDER);
-  await rejects(tk.getTicket(secret.key, DEV), "not_found");
-  await rejects(tk.addComment(secret.key, { body: "hi" }, DEV), "not_found");
-  await rejects(tk.updateTicket(secret.key, { status: "done" }, DEV), "not_found");
-  assert.ok(!(await tk.listTickets({ view: "all" }, DEV)).items.some((t) => t.key === secret.key));
-  assert.ok(!(await tk.listTickets({ q: "Founder-only" }, DEV)).items.length, "search respects access");
+  // Everyone sees every ticket and can comment, but only assignee/creator/founder can change it.
+  const other = await tk.createTicket({ title: "Founder's planning ticket" }, FOUNDER);
+  assert.equal((await tk.getTicket(other.key, DEV)).canEdit, false);
+  assert.ok((await tk.listTickets({ view: "all" }, DEV)).items.some((t) => t.key === other.key), "team sees all tickets");
+  assert.ok((await tk.listTickets({ q: "Founder's planning" }, DEV)).items.length, "search covers all tickets");
+  assert.ok((await tk.addComment(other.key, { body: "I can help with this" }, DEV)).id);
+  await rejects(tk.updateTicket(other.key, { status: "done" }, DEV), "forbidden");
+  await rejects(tk.deleteTicket(other.key, DEV), "forbidden");
   // Assignee can't change priority/due date or reassign; can't assign others when creating.
   await rejects(tk.updateTicket(T.key, { priority: "low" }, DEV), "forbidden");
   await rejects(tk.updateTicket(T.key, { owner: MKT.email }, DEV), "forbidden");
@@ -163,7 +165,7 @@ test("bulk delete: founder or creator only, per ticket", db, async () => {
   const a = await tk.createTicket({ title: "Bulk A" }, FOUNDER);
   const b = await tk.createTicket({ title: "Bulk B (dev's own)" }, DEV);
   const r1 = await tk.bulkDelete({ ids: [a.id, b.id] }, DEV);
-  assert.equal(r1.deleted, 1, "dev can only delete their own"); // a isn't visible to dev → not found
+  assert.equal(r1.deleted, 1, "dev can only delete their own");
   assert.ok(r1.results.find((x) => x.id === a.id && !x.ok));
   const r2 = await tk.bulkDelete({ ids: [a.key] }, FOUNDER);
   assert.equal(r2.deleted, 1);

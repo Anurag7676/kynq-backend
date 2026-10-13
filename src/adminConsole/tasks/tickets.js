@@ -2,13 +2,13 @@
 // priority Urgent/High/Medium/Low · labels · due date · attachments · comments · activity.
 // "Blocked" is a flag with a reason (a ticket can be in progress AND blocked).
 //
-// Who sees what (enforced here, on every call):
-//   owner  — every ticket; the only one who can import, reassign, share, or set priority and
-//            due dates on tickets they didn't create.
-//   member — tickets assigned to them, created by them, or shared with them (shared = on the
-//            watchers list: the founder shared it, or someone @mentioned them). Assignee and
-//            creator can update; anyone who can see a ticket can comment.
-//   Tickets someone can't see answer "not found", so their existence isn't revealed.
+// Who sees and changes what (enforced here, on every call):
+//   everyone on the team sees every ticket (so people know what the others are working on)
+//   and can comment on any of them.
+//   owner  — changes anything; the only one who can import, reassign, share, plan sprints, or
+//            set priority and due dates on tickets they didn't create.
+//   member — changes tickets assigned to them or created by them. "Shared with" (watchers: the
+//            founder shared it, or someone @mentioned them) means they follow its updates.
 //
 // Concurrent edits: every ticket has a `version`. A client may send the version it last saw;
 // if someone else changed the ticket meanwhile the update is refused with a conflict.
@@ -88,12 +88,12 @@ async function reserveKeys(n) {
 }
 
 // ─── Access ───
-const onTicket = (t, email) => t.owner === email || t.createdBy === email || (t.watchers ?? []).includes(email);
-export const canView = (t, admin) => isOwner(admin) || onTicket(t, admin.email);
+// Every console admin is on the Tasks team, and the team sees every ticket.
+export const canView = (_t, admin) => !!admin?.email;
 export const canEdit = (t, admin) => isOwner(admin) || t.owner === admin.email || t.createdBy === admin.email;
 /** Priority, due date and assignee: the founder, or the creator of the ticket. */
 const canPlan = (t, admin) => isOwner(admin) || t.createdBy === admin.email;
-const visibleFilter = (admin) => (isOwner(admin) ? {} : { $or: [{ owner: admin.email }, { createdBy: admin.email }, { watchers: admin.email }] });
+const visibleFilter = () => ({});
 
 // ─── Validation ───
 function cleanLabels(v) {
