@@ -22,6 +22,7 @@ import { liveNow } from "./live.js";
 import { traffic, realtime } from "./ga.js";
 import { seo } from "./seo.js";
 import { nudgeStats } from "./nudges.js";
+import { tasksRouter } from "./tasks/routes.js";
 import { listVideos, uploadVideo, deleteVideo, rebalance } from "./videos.js";
 
 const router = express.Router();
@@ -66,6 +67,10 @@ router.get("/me", requireAdmin, (req, res) => ok(res, { admin: req.admin }));
 
 // ─── Everything below needs an admin ───
 router.use(requireAdmin);
+
+// Tasks: every console admin (owner or subadmin), no section grant needed. Per-ticket access
+// is enforced inside (see tasks/tickets.js).
+router.use("/tasks", tasksRouter);
 
 router.get("/overview", requireSection("overview"), guard(async (req, res) => ok(res, await overview(rangeFromQuery(req.query)))));
 router.get("/analytics", requireSection("analytics"), guard(async (req, res) => ok(res, await analytics(rangeFromQuery(req.query)))));

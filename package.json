@@ -9,7 +9,7 @@
     "dev": "node --watch src/server.js",
     "start:gift": "node src/gift/server.js",
     "dev:gift": "node --watch src/gift/server.js",
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "node --test \"test/**/*.test.js\"",
     "check-tax": "node check-stripe-tax-config.js",
     "coupon": "node src/gift/generate-coupon.js",
     "tag-occasions": "node src/scripts/tag-occasions.js"
