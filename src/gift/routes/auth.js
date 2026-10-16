@@ -6,6 +6,7 @@ import {
   signIn, signOut, getCurrentUser, getOrCreateSession, isLockedOut,
 } from "../session.js";
 import { requestOtp, verifyOtp } from "../otp.js";
+import { deleteAccount } from "../delete-account.js";
 import { mergeAnonymousIntoUser } from "../merge.js";
 import { ok, badRequest, unauthorized, forbidden, tooMany, wrap } from "../http.js";
 import { attributeCampusSignup, CAMPUS_COOKIE } from "../../kynqExtra/campusLinks.js";
@@ -146,6 +147,18 @@ router.patch("/me", wrap(async (req, res) => {
 router.post("/signout", wrap(async (req, res) => {
   await signOut(req, res);
   ok(res, { ok: true });
+}));
+
+// Delete my account (Google Play requirement). The person types DELETE to confirm; see
+// ../delete-account.js for exactly what's deleted and what's kept anonymised. Rate limited.
+const deleteLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 5, message: { error: "too_many_requests", message: "Too many attempts. Try again later." } });
+router.post("/delete-account", deleteLimiter, wrap(async (req, res) => {
+  const me = await getCurrentUser(req);
+  if (!me) return unauthorized(res, "Sign in to delete your account.");
+  if (String(req.body?.confirm ?? "").trim().toUpperCase() !== "DELETE") return badRequest(res, "Type DELETE to confirm.");
+  const result = await deleteAccount(me);
+  await signOut(req, res).catch(() => {});
+  ok(res, { ok: true, deletedAt: Date.now(), anonId: result.anonId });
 }));
 
 // ─── Addresses (GET/POST /api/auth/me/addresses, PATCH/DELETE /:addressId) ───
