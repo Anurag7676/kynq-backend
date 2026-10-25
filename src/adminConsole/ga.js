@@ -45,11 +45,17 @@ export function gaStatus() {
 // One cached token per scope (Analytics and Search Console share the same service account).
 const tokenCache = new Map();
 const tokenPending = new Map();
+// Google can be slow or hang; never let an admin request wait on it past the load balancer's limit.
+const GOOGLE_TIMEOUT_MS = 20_000;
+const timeoutError = (err) => {
+  if (err?.name === "TimeoutError" || err?.name === "AbortError") throw Object.assign(new Error("Google Analytics took too long to answer. Try again in a minute."), { status: 504 });
+  throw err;
+};
 async function fetchToken(scope) {
   const c = credentials();
   const uri = c.token_uri || DEFAULT_TOKEN_URI;
   const assertion = jwt.sign({ iss: c.client_email, scope, aud: uri }, c.private_key, { algorithm: "RS256", expiresIn: 3600 });
-  const r = await fetch(uri, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer", assertion }) });
+  const r = await fetch(uri, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer", assertion }), signal: AbortSignal.timeout(GOOGLE_TIMEOUT_MS) }).catch(timeoutError);
   const j = await r.json().catch(() => ({}));
   if (!r.ok || !j.access_token) throw new Error(j.error_description || "Google rejected the service account key.");
   tokenCache.set(scope, { token: j.access_token, expires: Date.now() + (Number(j.expires_in) || 3600) * 1000 });
@@ -68,7 +74,8 @@ async function call(method, body) {
   const token = await accessToken();
   const r = await fetch(`${API}/properties/${encodeURIComponent(PROPERTY_ID)}:${method}`, {
     method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify(body),
-  });
+    signal: AbortSignal.timeout(GOOGLE_TIMEOUT_MS),
+  }).catch(timeoutError);
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw Object.assign(new Error(j.error?.message || `Google Analytics returned ${r.status}`), { status: r.status });
   return j;

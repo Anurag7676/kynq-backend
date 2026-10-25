@@ -70,17 +70,26 @@ export function pageParams(query, maxLimit = 100) {
 // ─── Cache ───
 // The server is small, so heavy numbers are computed at most once a minute per view, and
 // concurrent requests share one computation. Nothing polls; this only smooths repeat opens.
+// Stale-while-revalidate: once a view has been computed, later opens get the last numbers
+// straight away while a fresh copy is computed in the background. Only the very first open
+// (or the first after a restart) waits. If a refresh fails, the last good numbers stay.
 const store = new Map();
 export async function cached(key, ttlMs, compute) {
   const hit = store.get(key);
   const now = Date.now();
-  if (hit && hit.expires > now) return hit.value;
-  if (hit?.pending) return hit.pending;
+  const hasValue = hit && "value" in hit;
+  if (hasValue && hit.expires > now) return hit.value;
+  if (hit?.pending) return hasValue ? hit.value : hit.pending;
   const pending = Promise.resolve()
     .then(compute)
     .then((value) => { store.set(key, { value, expires: Date.now() + ttlMs }); return value; })
-    .catch((err) => { store.delete(key); throw err; });
+    .catch((err) => {
+      if (hasValue) { store.set(key, { value: hit.value, expires: hit.expires }); console.error(`[admin cache] refresh of ${key} failed, serving last numbers:`, err.message); }
+      else store.delete(key);
+      throw err;
+    });
   store.set(key, { ...(hit || {}), pending });
+  if (hasValue) { pending.catch(() => {}); return hit.value; } // stale now, fresh next time
   return pending;
 }
 export const dropCache = (prefix) => { for (const k of store.keys()) if (k.startsWith(prefix)) store.delete(k); };
