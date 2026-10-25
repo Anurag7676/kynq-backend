@@ -306,7 +306,12 @@ export async function computeAnalytics({ days, from, to }) {
     const week = Math.round((start - oldest) / (7 * DAY));
     const b = bases.get(week) ?? { size: 0, e1: 0, e7: 0 };
     const a = actives.get(week) ?? { a1: 0, a7: 0 };
-    return { cohort: istDay(start), size: b.size, d1: b.e1 ? round(a.a1 / b.e1, 3) : null, d7: b.e7 ? round(a.a7 / b.e7, 3) : null };
+    return {
+      cohort: istDay(start), size: b.size,
+      d1: b.e1 ? round(a.a1 / b.e1, 3) : null, d7: b.e7 ? round(a.a7 / b.e7, 3) : null,
+      // The counts behind the percentages: how many could be measured yet, and how many came back.
+      eligibleD1: b.e1, cameBackD1: a.a1, eligibleD7: b.e7, cameBackD7: a.a7,
+    };
   }).filter((c) => c.size > 0);
 
   const pf = peopleFacet[0] ?? {};
