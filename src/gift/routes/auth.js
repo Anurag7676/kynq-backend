@@ -152,7 +152,11 @@ router.post("/signout", wrap(async (req, res) => {
 // Delete my account (Google Play requirement). The person types DELETE to confirm; see
 // ../delete-account.js for exactly what's deleted and what's kept anonymised. Rate limited.
 const deleteLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 5, message: { error: "too_many_requests", message: "Too many attempts. Try again later." } });
+// App only: the website doesn't offer deletion (it points to the app, or email). The browser
+// sets Origin, so a web page can't pretend to be the app. Local test builds use http://localhost.
+const DELETE_ORIGINS = new Set(["https://app.kynq.in", ...(process.env.NODE_ENV === "production" ? [] : ["http://localhost"])]);
 router.post("/delete-account", deleteLimiter, wrap(async (req, res) => {
+  if (!DELETE_ORIGINS.has(req.get("origin"))) return forbidden(res, "Delete your account from the kynq app, or email hi@kynq.in.");
   const me = await getCurrentUser(req);
   if (!me) return unauthorized(res, "Sign in to delete your account.");
   if (String(req.body?.confirm ?? "").trim().toUpperCase() !== "DELETE") return badRequest(res, "Type DELETE to confirm.");
