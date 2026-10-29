@@ -19,6 +19,10 @@ export function ensureCallsIndexes() {
     indexesReady = Promise.all([
       mongoose.connection.collection(RECENT_MATCHES_COLLECTION).createIndex({ participantA: 1, matchedAt: 1 }),
       mongoose.connection.collection(RECENT_MATCHES_COLLECTION).createIndex({ participantB: 1, matchedAt: 1 }),
+      // Live-path lookups on calls (reconnect resume, history, stale sweep) query these directly.
+      mongoose.connection.collection("calls").createIndex({ participantA: 1, startedAt: -1 }),
+      mongoose.connection.collection("calls").createIndex({ participantB: 1, startedAt: -1 }),
+      mongoose.connection.collection("calls").createIndex({ status: 1, startedAt: 1 }),
     ]).catch((err) => { indexesReady = null; throw err; });
   }
   return indexesReady;
@@ -69,20 +73,51 @@ export async function getCall(callId) {
   return calls.get(callId);
 }
 
+// Indexed queries on the raw collection (participantA / participantB / startedAt are indexed;
+// see ensureConsoleIndexes). The generic collection().find() loads EVERY call into Node and
+// filters in JavaScript, which ran on every socket connection.
+const callsRaw = () => mongoose.connection.collection("calls");
+const strip = (doc) => { if (!doc) return null; const { _id, _key, ...rest } = doc; return rest; };
+const forUser = (scopedId) => ({ $or: [{ participantA: scopedId }, { participantB: scopedId }] });
+
 // Call history — most recent first, both directions (caller could be
 // participantA or participantB). Used by GET /api/kynq-extra/calls.
 export async function listCallsForUser(scopedId, limit = 50) {
-  const all = await calls.find((c) => c.participantA === scopedId || c.participantB === scopedId);
-  return all.sort((a, b) => b.startedAt - a.startedAt).slice(0, limit);
+  const docs = await callsRaw().find(forUser(scopedId)).sort({ startedAt: -1 }).limit(limit).toArray();
+  return docs.map(strip);
 }
 
 // Find a still-active call a user is (or very recently was) part of — used
 // by the reconnection grace-period flow to re-associate a fresh socket
 // connection with the call it dropped out of, without the client needing
-// to remember/pass a callId across a full page reload.
+// to remember/pass a callId across a full page reload. Newest first.
 export async function findActiveCallForUser(scopedId) {
-  const all = await calls.find((c) => c.status === "active" && (c.participantA === scopedId || c.participantB === scopedId));
-  return all[0] ?? null;
+  const doc = await callsRaw().findOne({ status: "active", ...forUser(scopedId) }, { sort: { startedAt: -1 } });
+  return strip(doc);
+}
+
+// Calls still marked active, oldest first — for the stale-call sweep.
+export async function listActiveCalls(limit = 500) {
+  const docs = await callsRaw().find({ status: "active" }, { projection: { _id: 0, id: 1, participantA: 1, participantB: 1, startedAt: 1, events: 1 } }).sort({ startedAt: 1 }).limit(limit).toArray();
+  return docs;
+}
+
+// Close a call nobody is in any more (lost to a server restart mid-call, both sides gone).
+// Ended at its LAST RECORDED ACTIVITY, not now, and with reason "stale", so it never earns
+// chat rewards, ambassador credit, or skews call-length stats with a days-long "call".
+export async function endStaleCall(callId) {
+  const call = await calls.get(callId);
+  if (!call || call.status !== "active") return null;
+  const lastSeen = Math.max(call.startedAt || 0, ...(call.events || []).map((e) => e.at || 0));
+  const next = {
+    ...call,
+    status: "ended",
+    endedAt: lastSeen,
+    endReason: "stale",
+    events: [...(call.events || []), { at: Date.now(), kind: "ended", note: "stale: nobody connected (lost to a restart or both sides gone)" }],
+  };
+  await calls.set(callId, next);
+  return next;
 }
 
 // Recently-matched pairs are excluded from re-matching for

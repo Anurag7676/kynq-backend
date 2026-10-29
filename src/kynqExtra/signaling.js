@@ -7,7 +7,7 @@ import { resolveSocketIdentity } from "./socketAuth.js";
 import { isAgeGateCleared } from "./profile.js";
 import { isRestricted } from "./reports.js";
 import * as matchmaker from "./matchmaker.js";
-import { getCall, endCall, findActiveCallForUser, createGameSession, getGameSession, updateGameSession } from "./calls-store.js";
+import { getCall, endCall, findActiveCallForUser, listActiveCalls, endStaleCall, createGameSession, getGameSession, updateGameSession } from "./calls-store.js";
 import { GAME_TYPES, TURN_BASED_GAMES, createInitialState, applyMove, redactState } from "./games.js";
 import { addChatMessage, markMessageStatus, setReaction } from "./chat-store.js";
 import { getRandomPrompt } from "./prompts.js";
@@ -103,6 +103,9 @@ async function leaveActiveCall(io, socket, reason) {
 // shaky, and the disconnected side gets RECONNECT_GRACE_MS to reconnect
 // before the call actually ends. scopedId -> { callId, peerScopedId, timer }
 const RECONNECT_GRACE_MS = Number(process.env.KYNQ_RECONNECT_GRACE_MS) || 20_000;
+const BOOTED_AT = Date.now();
+const MAX_RESUME_AGE_MS = 2 * 3_600_000; // no call is resumed after 2 h without any activity
+const STALE_SWEEP_EVERY_MS = 10 * 60_000;
 const pendingDisconnects = new Map();
 
 function scheduleGraceEnd(io, scopedId, callId, peerScopedId) {
@@ -175,6 +178,19 @@ async function tryResumeCall(io, socket) {
     if (!call) return;
     callId = call.id;
     peerScopedId = call.participantA === scopedId ? call.participantB : call.participantA;
+    // Only resume a call that's really alive: recent activity, and the other person connected or
+    // reconnecting. Otherwise it's a leftover (lost to a restart, both sides long gone) and
+    // resuming it would leave this user stuck on "already in a call". Just after a server start
+    // everyone is reconnecting, so give the other person a moment; the sweep closes it later
+    // if they never come back.
+    const lastSeen = Math.max(call.startedAt || 0, ...(call.events || []).map((e) => e.at || 0));
+    const peerAlive = userSockets.has(peerScopedId) || pendingDisconnects.get(peerScopedId)?.callId === callId;
+    const justStarted = Date.now() - BOOTED_AT < 3 * RECONNECT_GRACE_MS;
+    if (Date.now() - lastSeen > MAX_RESUME_AGE_MS || (!peerAlive && !justStarted)) {
+      await endStaleCall(callId).catch((err) => console.error("[kynqExtra] endStaleCall failed:", err.message));
+      console.log(`[kynqExtra] stale call closed on reconnect  callId=${callId} scopedId=${scopedId} peerAlive=${peerAlive}`);
+      return;
+    }
   }
 
   socket.join(callId);
@@ -191,6 +207,40 @@ async function tryResumeCall(io, socket) {
   // RTCPeerConnection is still usable).
   socket.emit("call:resumed", { callId, peerScopedId, initiator: true });
   socket.to(callId).emit("call:peer-reconnected", {});
+}
+
+// ─── Stale-call sweep ───────────────────────────────────────
+// The reconnect grace timers live in memory, so a deploy or restart mid-call leaves that call
+// "active" in the database forever, and both people then hit "already in a call". Shortly after
+// start (once reconnects have had time) and every 10 minutes, close calls that nobody is in:
+// no socket in the call's room and no one in a reconnect grace period for it.
+async function sweepStaleCalls(io) {
+  let closed = 0;
+  try {
+    for (let round = 0; round < 10; round++) {
+      const active = await listActiveCalls(500);
+      const stale = active.filter((c) => {
+        if (Date.now() - (c.startedAt || 0) < 2 * RECONNECT_GRACE_MS) return false; // brand new
+        if ((io.sockets.adapter.rooms.get(c.id)?.size ?? 0) > 0) return false; // someone's in it
+        return ![c.participantA, c.participantB].some((p) => pendingDisconnects.get(p)?.callId === c.id); // reconnecting
+      });
+      if (!stale.length) break;
+      for (const c of stale) { if (await endStaleCall(c.id).catch(() => null)) closed++; }
+      if (active.length < 500) break;
+    }
+  } catch (err) {
+    console.error("[kynqExtra] stale-call sweep failed:", err.message);
+  }
+  if (closed) console.log(`[kynqExtra] stale-call sweep closed ${closed} call(s) nobody was in`);
+  return closed;
+}
+/** Run the sweep now (tests, admin tooling). */
+export const sweepStaleCallsNow = () => (ioRef ? sweepStaleCalls(ioRef) : Promise.resolve(0));
+function startStaleCallSweep(io) {
+  setTimeout(() => {
+    void sweepStaleCalls(io);
+    setInterval(() => void sweepStaleCalls(io), STALE_SWEEP_EVERY_MS).unref?.();
+  }, 3 * RECONNECT_GRACE_MS).unref?.();
 }
 
 export function initSignaling(server) {
@@ -235,9 +285,12 @@ export function initSignaling(server) {
           console.log(`[kynqExtra] queue:join REJECTED scopedId=${scopedId} reason=age check not completed`);
           return ack?.({ ok: false, reason: "complete the age check first" });
         }
+        // Asking to match means this person isn't in a call from their side (fresh page, the
+        // call screen already closed). If the server still has one attached, close it first
+        // instead of refusing with "already in a call" forever.
         if (socket.data.currentCallId) {
-          console.log(`[kynqExtra] queue:join REJECTED scopedId=${scopedId} reason=already in a call (callId=${socket.data.currentCallId})`);
-          return ack?.({ ok: false, reason: "already in a call" });
+          console.log(`[kynqExtra] queue:join while attached to callId=${socket.data.currentCallId} scopedId=${scopedId}: ending it first`);
+          await leaveActiveCall(io, socket, "ended_by_user");
         }
 
         socket.data.city = typeof payload.location?.city === "string" ? payload.location.city.slice(0, 40) : null;
@@ -597,5 +650,6 @@ export function initSignaling(server) {
   });
 
   matchmaker.startMatchmaker(io);
+  startStaleCallSweep(io);
   return io;
 }
