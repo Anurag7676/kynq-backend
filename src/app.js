@@ -94,9 +94,15 @@ app.use((req, res, next) => {
 });
 app.use(cookieParser());
 // Allowed browser origins — override with comma-separated CORS_ORIGINS env.
-const ALLOWED_ORIGINS = process.env.CORS_ORIGINS
+// The Android app serves its bundled frontend from https://app.kynq.in (a virtual host inside
+// the app, never on the network). It's same-site with api-prod.kynq.in, so the usual auth
+// cookies work; it's always allowed, whatever CORS_ORIGINS says.
+export const APP_ORIGINS = ["https://app.kynq.in"];
+const ALLOWED_ORIGINS = [...(process.env.CORS_ORIGINS
   ? process.env.CORS_ORIGINS.split(",").map((s) => s.trim()).filter(Boolean)
-  : ["https://kynq.in", "https://www.kynq.in", "http://localhost:3007", "http://localhost:3000"];
+  : ["https://kynq.in", "https://www.kynq.in", "http://localhost:3007", "http://localhost:3000",
+     // Local test builds of the Android app (bundled, served as http://localhost; USB testing only).
+     ...(process.env.NODE_ENV === "production" ? [] : ["http://localhost"])]), ...APP_ORIGINS];
 app.use(cors({ origin: [...ALLOWED_ORIGINS, ...CONSOLE_ORIGINS], credentials: true }));
 app.use(helmet());
 
