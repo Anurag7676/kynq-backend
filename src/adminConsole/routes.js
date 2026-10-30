@@ -4,7 +4,7 @@
 import express from "express";
 import { ok, badRequest, notFound, forbidden, unauthorized, serverError } from "../gift/http.js";
 import { requireAdmin, requireSection, requireOwner, sameOriginWrites, startSession, endSession, verifyGoogleAccessToken, resolveAdmin } from "./auth.js";
-import { rangeFromQuery } from "./util.js";
+import { rangeFromQuery, col } from "./util.js";
 import { SECTIONS } from "./sections.js";
 import { listSubadmins, upsertSubadmin, revokeSubadmin } from "./subadmins.js";
 import { overview, analytics, finance } from "./stats.js";
@@ -18,6 +18,7 @@ import { koinInvoicePdf, clientInvoicePdf } from "../accounting/pdf.js";
 import { excludedUserIds } from "./util.js";
 import { listInbox, getInboxItem, setInboxStatus } from "./inbox.js";
 import { listAudit, logAudit } from "./audit.js";
+import { broadcast as pushBroadcast, PROMO_TEMPLATES } from "../kynqExtra/push.js";
 import { liveNow } from "./live.js";
 import { traffic, realtime } from "./ga.js";
 import { seo } from "./seo.js";
@@ -241,6 +242,29 @@ router.post("/team/:email/revoke", requireOwner, guard(async (req, res) => {
   if (!doc) return notFound(res, "subadmin not found");
   await logAudit(req.admin.email, "subadmin.revoke", doc.email, {});
   ok(res, { subadmin: doc });
+}));
+
+// ─── Marketing push notifications (Android app) ───
+// Ready-made playful templates; a test goes only to the signed-in admin's own phones; sending
+// to everyone is owner-only, capped server-side at one promo per person per ~day, and audited.
+router.get("/push/templates", requireSection("nudges"), (req, res) => ok(res, { templates: PROMO_TEMPLATES }));
+router.post("/push/broadcast", requireSection("nudges"), guard(async (req, res) => {
+  const { title, body, image, route, test } = req.body ?? {};
+  if (!title || !body) return badRequest(res, "Title and message are required.");
+  if (route && !String(route).startsWith("/m/")) return badRequest(res, "The link must be an app screen (starts with /m/).");
+  let testUserId = null;
+  if (test !== false) {
+    const me = await col("users").findOne({ email: req.admin.email }, { projection: { id: 1 } });
+    if (!me) return badRequest(res, "Your admin email has no kynq app account to test on.");
+    testUserId = me.id;
+  } else if (req.admin.role !== "owner") {
+    return forbidden(res, "Only owners can send a notification to everyone.");
+  }
+  try {
+    const result = await pushBroadcast({ title: String(title), body: String(body), image: image || undefined, route: route || "/m/home/", testUserId });
+    await logAudit(req.admin.email, testUserId ? "push.broadcast.test" : "push.broadcast.all", null, { title, body, image: image || null, route: route || null, ...result });
+    ok(res, result);
+  } catch (err) { badRequest(res, err.message); }
 }));
 
 export default router;

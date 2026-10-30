@@ -56,3 +56,12 @@ test("without Firebase configured, sending is a silent no-op", db, async () => {
   assert.equal(push.pushConfigured(), false);
   assert.deepEqual(await push.notify.message("u2", { fromId: "u9", fromName: "A", text: "hi" }), { sent: 0 });
 });
+
+test("broadcast refuses when push isn't configured (no silent 'sent: 0' for a campaign)", db, async () => {
+  await assert.rejects(push.broadcast({ title: "Hi", body: "There" }), /isn't configured/);
+  await assert.rejects(push.broadcast({ title: "", body: "There" }), /required/);
+});
+
+test("promo templates are short enough for a phone banner", db, async () => {
+  for (const t of push.PROMO_TEMPLATES) { assert.ok(t.title.length <= 40, t.title); assert.ok(t.body.length <= 120, t.body); assert.ok(t.route.startsWith("/m/")); }
+});
