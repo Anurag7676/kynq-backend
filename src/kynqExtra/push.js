@@ -98,6 +98,18 @@ function message(tokens, { title, body, route, kind, tag, image }) {
   };
 }
 
+/** Who a broadcast can reach right now (for the admin page). */
+export async function reach() {
+  await ensurePushIndexes();
+  const cutoff = Date.now() - 20 * 60 * 60 * 1000;
+  const [phones, people, promoReady] = await Promise.all([
+    col().countDocuments({}),
+    col().distinct("userId").then((a) => a.length),
+    col().countDocuments({ $or: [{ lastPromoAt: { $exists: false } }, { lastPromoAt: { $lt: cutoff } }] }),
+  ]);
+  return { phones, people, promoReady, configured: pushConfigured() };
+}
+
 // ─── Marketing broadcasts (admin only): their own muteable "promos" channel, at most one per
 // person per PROMO_GAP, sent in batches of 500. `testUserId` sends only to that person. ───
 const PROMO_GAP_MS = 20 * 60 * 60 * 1000;

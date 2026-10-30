@@ -18,7 +18,7 @@ import { koinInvoicePdf, clientInvoicePdf } from "../accounting/pdf.js";
 import { excludedUserIds } from "./util.js";
 import { listInbox, getInboxItem, setInboxStatus } from "./inbox.js";
 import { listAudit, logAudit } from "./audit.js";
-import { broadcast as pushBroadcast, PROMO_TEMPLATES } from "../kynqExtra/push.js";
+import { broadcast as pushBroadcast, PROMO_TEMPLATES, reach as pushReach } from "../kynqExtra/push.js";
 import { liveNow } from "./live.js";
 import { traffic, realtime } from "./ga.js";
 import { seo } from "./seo.js";
@@ -248,6 +248,18 @@ router.post("/team/:email/revoke", requireOwner, guard(async (req, res) => {
 // Ready-made playful templates; a test goes only to the signed-in admin's own phones; sending
 // to everyone is owner-only, capped server-side at one promo per person per ~day, and audited.
 router.get("/push/templates", requireSection("nudges"), (req, res) => ok(res, { templates: PROMO_TEMPLATES }));
+router.get("/push/overview", requireSection("nudges"), guard(async (req, res) => {
+  const [reachNow, history] = await Promise.all([
+    pushReach(),
+    col("admin_audit").find({ action: { $in: ["push.broadcast.test", "push.broadcast.all"] } }).sort({ at: -1 }).limit(30).toArray(),
+  ]);
+  ok(res, {
+    templates: PROMO_TEMPLATES,
+    reach: reachNow,
+    canSendAll: req.admin.role === "owner",
+    history: history.map((h) => ({ id: h.id, at: h.at, by: h.admin, test: h.action.endsWith(".test"), title: h.meta?.title ?? "", body: h.meta?.body ?? "", image: h.meta?.image ?? null, sent: h.meta?.sent ?? 0, failed: h.meta?.failed ?? 0, targeted: h.meta?.targeted ?? 0 })),
+  });
+}));
 router.post("/push/broadcast", requireSection("nudges"), guard(async (req, res) => {
   const { title, body, image, route, test } = req.body ?? {};
   if (!title || !body) return badRequest(res, "Title and message are required.");
