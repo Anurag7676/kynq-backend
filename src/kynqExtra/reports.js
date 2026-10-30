@@ -1,3 +1,4 @@
+import { isLockedOut } from "../gift/session.js";
 import KynqExtraReport from "../models/kynqExtraReportModel.js";
 import { findUserById, saveUser } from "../gift/session.js";
 import { enforceRestriction } from "./restrictions.js";
@@ -37,7 +38,7 @@ export async function reviewReport(reportId, { status, actionTaken, reviewedBy }
 
 export async function isRestricted(userId) {
   const user = await findUserById(userId).catch(() => null);
-  return !!user?.kynqExtraRestricted;
+  return isLockedOut(user);
 }
 
 export async function setRestricted(userId, restricted) {

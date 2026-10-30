@@ -17,6 +17,7 @@ import { debit, credit, InsufficientBalanceError } from "./wallet.js";
 import { ECONOMY, isPaidGenderPreference } from "./economy.js";
 import { activePassExpiry, startPass, cancelPass } from "./gender-pass.js";
 import { DEMO_MATCH_ENABLED, demoDelayMs, noteDemoServed, resetDemoBackoff, pickDemoMatch } from "./demo-accounts.js";
+import { shotSchedule } from "./moderation.js";
 
 const TICK_MS = 1000;
 
@@ -312,6 +313,9 @@ export async function runMatchTick(io) {
     console.log(`[kynqExtra] match:found  callId=${call.id} a=${entry.scopedId} b=${match.scopedId} waitedMsA=${Date.now() - entry.joinedAt} waitedMsB=${Date.now() - match.joinedAt} queueDepth=${queue.size}`);
     io.to(entry.socketId).emit("match:found", { callId: call.id, peerScopedId: match.scopedId, initiator: true });
     io.to(match.socketId).emit("match:found", { callId: call.id, peerScopedId: entry.scopedId, initiator: false });
+    // Nudity protection: each side gets its own random snapshot seconds for this call.
+    io.to(entry.socketId).emit("mod:shots", { callId: call.id, seconds: shotSchedule() });
+    io.to(match.socketId).emit("mod:shots", { callId: call.id, seconds: shotSchedule() });
   }
 
   explainStuck([...queue.values()].sort((a, b) => a.joinedAt - b.joinedAt), blockedPairs, recentPairs, Date.now());

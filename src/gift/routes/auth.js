@@ -99,6 +99,11 @@ router.post("/google", otpLimiter, wrap(async (req, res) => {
 
   const { user, isNew } = await getOrCreateUser(email, name);
   if (isLockedOut(user)) {
+    const until = Number(user.kynqExtraRestrictedUntil) || 0;
+    if (!user.kynqExtraRestricted && until > Date.now()) {
+      const when = new Date(until).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
+      return forbidden(res, `Your account is paused until ${when} for breaking our rules on nudity. If you think this is a mistake, email hi@kynq.in.`);
+    }
     return forbidden(res, "This account has been restricted, so you can't sign in. If you think this is a mistake, email hi@kynq.in.");
   }
   if (isNew && req.cookies?.[CAMPUS_COOKIE]) {

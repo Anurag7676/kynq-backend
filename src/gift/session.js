@@ -128,7 +128,9 @@ export async function signOut(req, res) {
 // A restricted account (set by an admin, or automatically after 3 open reports) is locked
 // out of kynq entirely: no sign-in, no existing session, no matching. Unrestricting
 // restores access.
-export const isLockedOut = (user) => !!user?.kynqExtraRestricted;
+// Restricted for good (admin, or a third nudity strike), or for a while (kynqExtraRestrictedUntil:
+// a nudity lockout or cool-down, see kynqExtra/moderation.js). Timed ones lapse on their own.
+export const isLockedOut = (user) => !!user?.kynqExtraRestricted || (Number(user?.kynqExtraRestrictedUntil) || 0) > Date.now();
 
 /** Signs a user out everywhere by deleting every auth session they hold. */
 export async function revokeSessionsForUser(userId) {

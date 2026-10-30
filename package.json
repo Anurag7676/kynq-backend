@@ -20,6 +20,7 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.828.0",
     "@aws-sdk/s3-request-presigner": "^3.1137.0",
+    "@tensorflow/tfjs": "^4.22.0",
     "aws-sdk": "^2.1692.0",
     "axios": "^1.13.2",
     "bcryptjs": "^3.0.2",
@@ -29,8 +30,10 @@
     "dotenv": "^16.5.0",
     "express": "^5.1.0",
     "express-rate-limit": "^8.6.0",
+    "firebase-admin": "^13.10.0",
     "geoip-lite": "^2.0.3",
     "helmet": "^8.1.0",
+    "jpeg-js": "^0.4.4",
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^8.13.2",
     "morgan": "^1.10.0",

@@ -10,14 +10,38 @@
 // - DMs are text only, between accepted friends, stored in plain text
 //   (like in-call chat). Not end-to-end encrypted.
 //
-// Same collection() key-value pattern as the rest of kynqExtra.
+// Same collection() key-value pattern as the rest of kynqExtra for writes; reads that span
+// many documents (lists, counts, last message, unread) are real indexed Mongo queries, never
+// collection().find(), which pulls the whole collection into Node.
+import mongoose from "mongoose";
 import { collection, makeId } from "../gift/store.js";
 import { isBlockedEitherWay, pairKey } from "./blocks.js";
-import { listCallsForUser } from "./calls-store.js";
 
 const requests = collection("friend_requests");
 const friendships = collection("friendships");
 const dms = collection("dm_messages");
+const raw = (name) => mongoose.connection.collection(name);
+const strip = (doc) => { if (!doc) return null; const { _id, _key, ...rest } = doc; return rest; };
+const UNREAD = { $in: [null, 0] }; // readAt never set (same as the old `!m.readAt`)
+
+// Indexes for the queries below; created once, safe to repeat.
+let indexesReady = null;
+export function ensureFriendIndexes() {
+  indexesReady ??= Promise.all([
+    raw("friendships").createIndex({ _key: 1 }),
+    raw("friendships").createIndex({ a: 1 }),
+    raw("friendships").createIndex({ b: 1 }),
+    raw("friend_requests").createIndex({ _key: 1 }),
+    raw("friend_requests").createIndex({ to: 1, status: 1 }),
+    raw("friend_requests").createIndex({ from: 1, status: 1 }),
+    raw("dm_messages").createIndex({ _key: 1 }),
+    raw("dm_messages").createIndex({ pairKey: 1, at: -1 }),
+    raw("dm_messages").createIndex({ pairKey: 1, to: 1, readAt: 1 }),
+    raw("blocks").createIndex({ _key: 1 }),
+  ]).catch((err) => { indexesReady = null; console.error("[friends] index creation failed:", err.message); });
+  return indexesReady;
+}
+const friendsOf = (me) => raw("friendships").find({ $or: [{ a: me }, { b: me }] }).toArray();
 
 const DECLINE_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
 const REQUESTS_PER_DAY = 30;
@@ -39,8 +63,7 @@ function bump(key, limit, windowMs) {
 }
 
 async function hadCallBetween(a, b) {
-  const calls = await listCallsForUser(a, 500);
-  return calls.some((c) => (c.participantA === a && c.participantB === b) || (c.participantA === b && c.participantB === a));
+  return !!(await raw("calls").findOne({ $or: [{ participantA: a, participantB: b }, { participantA: b, participantB: a }] }, { projection: { _id: 1 } }));
 }
 
 export async function areFriends(a, b) {
@@ -57,9 +80,28 @@ export async function statusFor(me, other) {
   return "none";
 }
 
+/** statusFor for many people at once: three batched lookups instead of ~4 per person. */
 export async function statusMap(me, ids) {
+  await ensureFriendIndexes();
+  const others = [...new Set(ids)].filter((id) => id !== me);
+  const keys = others.map((id) => pairKey(me, id));
+  const blockKeys = others.flatMap((id) => [`${me}>${id}`, `${id}>${me}`]);
+  const [blocked, friends, reqs] = await Promise.all([
+    raw("blocks").find({ _key: { $in: blockKeys } }, { projection: { _key: 1 } }).toArray(),
+    raw("friendships").find({ _key: { $in: keys } }, { projection: { _key: 1 } }).toArray(),
+    raw("friend_requests").find({ _key: { $in: keys }, status: "pending" }, { projection: { _key: 1, from: 1 } }).toArray(),
+  ]);
+  const blockedSet = new Set(blocked.map((b) => b._key)), friendSet = new Set(friends.map((f) => f._key));
+  const reqBy = new Map(reqs.map((r) => [r._key, r]));
   const out = {};
-  for (const id of ids) out[id] = await statusFor(me, id); // eslint-disable-line no-await-in-loop
+  for (const id of ids) {
+    if (id === me) { out[id] = "self"; continue; }
+    const key = pairKey(me, id), r = reqBy.get(key);
+    out[id] = blockedSet.has(`${me}>${id}`) || blockedSet.has(`${id}>${me}`) ? "blocked"
+      : friendSet.has(key) ? "friends"
+      : r ? (r.from === me ? "requested" : "incoming")
+      : "none";
+  }
   return out;
 }
 
@@ -124,25 +166,37 @@ export async function dropOnBlock(a, b) {
 
 /** How many friends — no per-friend DM lookups (listFriends does those). */
 export async function countFriends(me) {
-  return (await friendships.find((f) => f.a === me || f.b === me)).length;
+  await ensureFriendIndexes();
+  return raw("friendships").countDocuments({ $or: [{ a: me }, { b: me }] });
 }
 
+/** Every friend with their last message and my unread count, in one aggregation over the
+ *  pair's messages (newest first per pair, via the { pairKey, at } index). */
 export async function listFriends(me) {
-  const all = await friendships.find((f) => f.a === me || f.b === me);
-  const out = [];
-  for (const f of all) {
-    const other = f.a === me ? f.b : f.a;
-    // eslint-disable-next-line no-await-in-loop
-    const last = await lastDm(me, other);
-    // eslint-disable-next-line no-await-in-loop
-    const unread = await unreadCount(me, other);
-    out.push({ userId: other, since: f.since, last, unread });
-  }
+  await ensureFriendIndexes();
+  const all = await friendsOf(me);
+  if (!all.length) return [];
+  const keys = all.map((f) => pairKey(f.a, f.b));
+  const per = await raw("dm_messages").aggregate([
+    { $match: { pairKey: { $in: keys } } },
+    { $sort: { pairKey: 1, at: -1 } },
+    { $group: {
+      _id: "$pairKey",
+      text: { $first: "$text" }, from: { $first: "$from" }, at: { $first: "$at" },
+      unread: { $sum: { $cond: [{ $and: [{ $eq: ["$to", me] }, { $in: [{ $ifNull: ["$readAt", null] }, [null, 0]] }] }, 1, 0] } },
+    } },
+  ]).toArray();
+  const byKey = new Map(per.map((p) => [p._id, p]));
+  const out = all.map((f) => {
+    const p = byKey.get(pairKey(f.a, f.b));
+    return { userId: f.a === me ? f.b : f.a, since: f.since, last: p ? { text: p.text, from: p.from, at: p.at } : null, unread: p?.unread ?? 0 };
+  });
   return out.sort((x, y) => (y.last?.at ?? y.since) - (x.last?.at ?? x.since));
 }
 
 export async function listRequests(me) {
-  const all = await requests.find((r) => r.status === "pending" && (r.from === me || r.to === me));
+  await ensureFriendIndexes();
+  const all = await raw("friend_requests").find({ status: "pending", $or: [{ from: me }, { to: me }] }).toArray();
   return {
     incoming: all.filter((r) => r.to === me).map((r) => ({ userId: r.from, callId: r.callId, at: r.createdAt })),
     outgoing: all.filter((r) => r.from === me).map((r) => ({ userId: r.to, callId: r.callId, at: r.createdAt })),
@@ -151,26 +205,13 @@ export async function listRequests(me) {
 
 // ─── Direct messages ───
 
-async function lastDm(a, b) {
-  const key = pairKey(a, b);
-  const all = await dms.find((m) => m.pairKey === key);
-  if (!all.length) return null;
-  const m = all.reduce((p, c) => (c.at > p.at ? c : p));
-  return { text: m.text, from: m.from, at: m.at };
-}
-
-async function unreadCount(me, other) {
-  const key = pairKey(me, other);
-  const all = await dms.find((m) => m.pairKey === key && m.to === me && !m.readAt);
-  return all.length;
-}
-
+/** The newest `limit` messages (before `before`, if given), oldest first. */
 export async function listDm(me, other, { limit = 100, before } = {}) {
+  await ensureFriendIndexes();
   if (!(await areFriends(me, other))) throw new FriendError("You can only message friends", 403);
-  const key = pairKey(me, other);
-  let all = await dms.find((m) => m.pairKey === key && (!before || m.at < before));
-  all = all.sort((x, y) => x.at - y.at);
-  return all.slice(-limit);
+  const q = { pairKey: pairKey(me, other), ...(before ? { at: { $lt: before } } : {}) };
+  const newest = await raw("dm_messages").find(q).sort({ at: -1 }).limit(limit).toArray();
+  return newest.reverse().map(strip);
 }
 
 export async function sendDm(from, to, text) {
@@ -186,18 +227,22 @@ export async function sendDm(from, to, text) {
 }
 
 export async function markRead(me, other) {
-  const key = pairKey(me, other);
-  const unread = await dms.find((m) => m.pairKey === key && m.to === me && !m.readAt);
+  await ensureFriendIndexes();
+  const q = { pairKey: pairKey(me, other), to: me, readAt: UNREAD };
+  const ids = (await raw("dm_messages").find(q, { projection: { id: 1 } }).toArray()).map((m) => m.id);
   const now = Date.now();
-  for (const m of unread) await dms.set(m.id, { ...m, readAt: now }); // eslint-disable-line no-await-in-loop
-  return { marked: unread.length, readAt: now, ids: unread.map((m) => m.id) };
+  if (ids.length) await raw("dm_messages").updateMany({ ...q, id: { $in: ids } }, { $set: { readAt: now } });
+  return { marked: ids.length, readAt: now, ids };
 }
 
+/** Badge numbers: three counts, no per-friend work. */
 export async function summary(me) {
-  const [reqs, friends] = await Promise.all([listRequests(me), listFriends(me)]);
-  return {
-    pendingIncoming: reqs.incoming.length,
-    unread: friends.reduce((n, f) => n + f.unread, 0),
-    friends: friends.length,
-  };
+  await ensureFriendIndexes();
+  const all = await friendsOf(me);
+  const keys = all.map((f) => pairKey(f.a, f.b));
+  const [pendingIncoming, unread] = await Promise.all([
+    raw("friend_requests").countDocuments({ to: me, status: "pending" }),
+    keys.length ? raw("dm_messages").countDocuments({ pairKey: { $in: keys }, to: me, readAt: UNREAD }) : 0,
+  ]);
+  return { pendingIncoming, unread, friends: all.length };
 }

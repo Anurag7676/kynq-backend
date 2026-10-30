@@ -50,6 +50,7 @@ export async function deleteAccount(user) {
   counts.chats = callIds.length ? await del("chat_messages", { _key: { $in: callIds } }) : 0;
   counts.games = callIds.length ? await del("game_sessions", { $or: [{ callId: { $in: callIds } }, { _key: { $in: callIds } }] }) : 0;
   counts.authSessions = await del("auth-sessions", { userId });
+  counts.pushTokens = await del("push_tokens", { userId }); // no more notifications to their phones
   counts.otps = email ? await del("otps", { _key: email }) : 0;
   counts.carts = await del("carts", { $or: [{ _key: userId }, { sessionId: userId }] });
   counts.wishlists = await del("wishlists", { $or: [{ _key: userId }, { sessionId: userId }] });

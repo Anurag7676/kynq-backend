@@ -1,4 +1,6 @@
 import express from "express";
+import mongoose from "mongoose";
+import { notify, registerToken, unregisterToken } from "../../kynqExtra/push.js";
 import { getScopedId, getOrCreateSession } from "../session.js";
 import { ok, okCacheable, created, badRequest, unauthorized, forbidden, wrap } from "../http.js";
 import { getExtraProfile, setExtraProfile, getPublicName, INTEREST_TOPICS, LOCATION_SCOPES, INDIAN_CITIES } from "../../kynqExtra/profile.js";
@@ -169,6 +171,23 @@ async function requireChallengeUser(req, res) {
   return userId;
 }
 
+// Push notifications are fire-and-forget: they never delay or fail the request that caused them.
+const nameOf = async (id) => (await getPublicName(id).catch(() => null))?.name ?? "Someone";
+const otherIn = (c, me) => (c?.participantA === me ? c?.participantB : c?.participantA);
+const later = (fn) => { setImmediate(() => { fn().catch((err) => console.error("[push] trigger failed:", err.message)); }); };
+
+// The app's FCM token, saved after sign-in and dropped on sign-out.
+router.post("/push/register", wrap(async (req, res) => {
+  const { userId } = await getScopedId(req, res);
+  if (!userId) return unauthorized(res, "sign in first");
+  try { await registerToken(userId, req.body?.token, req.body?.platform === "ios" ? "ios" : "android"); ok(res, { ok: true }); }
+  catch (err) { badRequest(res, err.message); }
+}));
+router.post("/push/unregister", wrap(async (req, res) => {
+  await unregisterToken(req.body?.token).catch(() => {});
+  ok(res, { ok: true });
+}));
+
 router.get("/challenges", wrap(async (req, res) => {
   const scopedId = await requireChallengeUser(req, res);
   if (!scopedId) return;
@@ -181,7 +200,9 @@ router.post("/challenges", wrap(async (req, res) => {
   const { peerScopedId } = req.body || {};
   if (!peerScopedId) return badRequest(res, "peerScopedId required");
   try {
-    created(res, { challenge: await proposeChallenge(scopedId, peerScopedId) });
+    const challenge = await proposeChallenge(scopedId, peerScopedId);
+    created(res, { challenge });
+    later(async () => notify.challengeInvite(peerScopedId, { fromName: await nameOf(scopedId) }));
   } catch (err) {
     badRequest(res, err.message);
   }
@@ -201,6 +222,7 @@ router.post("/challenges/:id/respond", wrap(async (req, res) => {
   try {
     const challenge = await respondToChallenge(req.params.id, scopedId, !!req.body?.accept);
     ok(res, { challenge });
+    if (req.body?.accept) later(async () => notify.challengeAccepted(otherIn(challenge, scopedId), { fromName: await nameOf(scopedId) }));
   } catch (err) {
     badRequest(res, err.message);
   }
@@ -220,7 +242,9 @@ router.post("/challenges/:id/ask", wrap(async (req, res) => {
   const scopedId = await requireChallengeUser(req, res);
   if (!scopedId) return;
   try {
-    ok(res, { challenge: await askQuestion(req.params.id, scopedId, req.body?.question) });
+    const challenge = await askQuestion(req.params.id, scopedId, req.body?.question);
+    ok(res, { challenge });
+    later(async () => notify.challengeTurn(otherIn(challenge, scopedId), { fromName: await nameOf(scopedId) }));
   } catch (err) {
     badRequest(res, err.message);
   }
@@ -440,8 +464,10 @@ router.get("/friends", wrap(async (req, res) => {
   if (!userId) return unauthorized(res, "sign in to use kynq extra");
   const [list, requests] = await Promise.all([friends.listFriends(userId), friends.listRequests(userId)]);
   const ids = [...new Set([...list.map((f) => f.userId), ...requests.incoming.map((r) => r.userId), ...requests.outgoing.map((r) => r.userId)])];
-  const names = {};
-  for (const id of ids) names[id] = (await getPublicName(id))?.name ?? "someone"; // eslint-disable-line no-await-in-loop
+  // One indexed lookup for every name (was one query per person, in sequence).
+  const docs = ids.length ? await mongoose.connection.collection("users").find({ id: { $in: ids } }, { projection: { id: 1, name: 1 } }).toArray() : [];
+  const byId = new Map(docs.map((u) => [u.id, u.name]));
+  const names = Object.fromEntries(ids.map((id) => [id, byId.get(id) || "someone"]));
   ok(res, { friends: list, requests, names });
 }));
 
@@ -465,8 +491,8 @@ router.post("/friends/requests", wrap(async (req, res) => {
   try {
     const r = await friends.sendRequest(userId, String(to ?? ""), { callId });
     const me = (await getPublicName(userId))?.name ?? "someone";
-    if (r.accepted) { emitToUser(to, "friend:accepted", { userId, name: me }); emitToUser(userId, "friend:accepted", { userId: to }); }
-    else if (r.request) emitToUser(to, "friend:request", { userId, name: me });
+    if (r.accepted) { emitToUser(to, "friend:accepted", { userId, name: me }); emitToUser(userId, "friend:accepted", { userId: to }); later(() => notify.friendAccepted(to, { fromId: userId, fromName: me })); }
+    else if (r.request) { emitToUser(to, "friend:request", { userId, name: me }); later(() => notify.friendRequest(to, { fromName: me })); }
     ok(res, { status: r.status });
   } catch (err) { friendErr(res, err); }
 }));
@@ -478,7 +504,7 @@ router.post("/friends/requests/:userId/respond", wrap(async (req, res) => {
   const decision = req.body?.decision === "accept" ? "accept" : "decline";
   try {
     const r = await friends.respondRequest(userId, other, decision);
-    if (r.accepted) { const me = (await getPublicName(userId))?.name ?? "someone"; emitToUser(other, "friend:accepted", { userId, name: me }); }
+    if (r.accepted) { const me = (await getPublicName(userId))?.name ?? "someone"; emitToUser(other, "friend:accepted", { userId, name: me }); later(() => notify.friendAccepted(other, { fromId: userId, fromName: me })); }
     ok(res, { status: r.status });
   } catch (err) { friendErr(res, err); }
 }));
@@ -505,6 +531,7 @@ router.post("/dm/:userId", wrap(async (req, res) => {
     const m = await friends.sendDm(userId, req.params.userId, req.body?.text);
     emitToUser(req.params.userId, "dm:message", m);
     emitToUser(userId, "dm:message", m);
+    later(async () => notify.message(req.params.userId, { fromId: userId, fromName: await nameOf(userId), text: m.text }));
     created(res, { message: m });
   } catch (err) { friendErr(res, err); }
 }));

@@ -29,6 +29,7 @@ import { ensureBlockIndexes } from "./blocks.js";
 import { ensureCallsIndexes } from "./calls-store.js";
 import { startPairQuestions, stopPairQuestions, pickPairAnswer, skipPairQuestion } from "./pair-question-live.js";
 import { recordNudgeEvent, ensureNudgeEventIndexes } from "./nudge-events.js";
+import { handleScore as handleModerationScore, ensureModerationIndexes, warmModeration } from "./moderation.js";
 
 // scopedId -> Set<socketId>, so REST routes (friend requests, DMs) can push
 // realtime events to a user wherever they are in the app.
@@ -93,6 +94,19 @@ async function leaveActiveCall(io, socket, reason) {
   if (endedCall) recordCallForAmbassadors(endedCall).catch((err) => console.error("[ambassador] recordCallForAmbassadors failed:", err));
   console.log(`[kynqExtra] call:ended  callId=${callId} reason=${reason}`);
   socket.to(callId).emit("call:ended", { reason });
+  clearCallState(io, callId);
+}
+
+// Confirmed nudity (moderation.js): end the call for both right away and tell each side why.
+async function endForModeration(io, callId, offenderId) {
+  const sockets = await io.in(callId).fetchSockets();
+  for (const s of sockets) s.emit("mod:action", { type: "ended", you: s.data.scopedId === offenderId });
+  await endMeter(callId);
+  closeInvite(io, callId, null);
+  const endedCall = await endCall(callId, "moderation").catch((err) => { console.error("[kynqExtra] endCall failed:", err); return null; });
+  if (endedCall) recordCallForAmbassadors(endedCall).catch(() => {});
+  console.log(`[kynqExtra] call:ended  callId=${callId} reason=moderation offender=${offenderId}`);
+  io.to(callId).emit("call:ended", { reason: "moderation" });
   clearCallState(io, callId);
 }
 
@@ -251,6 +265,9 @@ export function initSignaling(server) {
   attachPulse(io);
   ioRef = io;
   ensureChatMeterIndexes().catch(() => {}); // warm-up only; writes await it themselves
+  ensureModerationIndexes().catch(() => {});
+  // Production: load the nudity model before the first report needs it (elsewhere it loads on first use).
+  if (process.env.NODE_ENV === "production") setTimeout(() => void warmModeration(), 5_000).unref();
   ensureDemoAccountIndexes().catch(() => {});
   ensureBlockIndexes().catch(() => {});
   ensureCallsIndexes().catch(() => {});
@@ -296,8 +313,9 @@ export function initSignaling(server) {
         socket.data.city = typeof payload.location?.city === "string" ? payload.location.city.slice(0, 40) : null;
         // Gender preference (Master Spec v3 §5) is a paid extra. The seeker's
         // OWN gender always comes from their saved profile, never the payload.
-        // Only "female" is offered as a match preference; a stale saved male/other one just means "anyone".
-        const wanted = ["female"].includes(payload.genderPreference) ? payload.genderPreference : null;
+        // "female" (paid, ECONOMY.genderPreference.paidPreferences) and "male" (free) are offered;
+        // anything else just means "anyone".
+        const wanted = ["female", "male"].includes(payload.genderPreference) ? payload.genderPreference : null;
         if (isPaidGenderPreference(wanted) && !(await activePassExpiry(scopedId))) { // a live pass already covers it
           const price = ECONOMY.genderPreference.price;
           const balance = await getBalance(scopedId);
@@ -601,6 +619,16 @@ export function initSignaling(server) {
         if (err instanceof GiftError) return ack?.({ ok: false, reason: err.message, code: err.code });
         console.error("[kynqExtra] gift:send failed:", err);
         ack?.({ ok: false, reason: "couldn't send that gift" });
+      }
+    });
+
+    // Nudity protection: a score from this device (its own camera, or the video it receives).
+    socket.on("mod:score", async (payload, ack) => {
+      try {
+        ack?.(await handleModerationScore({ socket, scopedId, payload, endForModeration: (c, o) => endForModeration(io, c, o) }));
+      } catch (err) {
+        console.error("[moderation] mod:score failed:", err.message);
+        ack?.({ ok: false, reason: "couldn't check that" });
       }
     });
 
