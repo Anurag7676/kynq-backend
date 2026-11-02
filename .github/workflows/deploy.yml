@@ -1,14 +1,17 @@
 # Backend CI/CD: every push and PR is checked; pushes to main are deployed to EC2.
 #
-# One-time setup in GitHub → repo Settings:
-#   Secrets and variables → Actions → Secrets:
-#     EC2_HOST      public IP or DNS of the server
-#     EC2_USER      SSH user (e.g. ubuntu or ec2-user)
-#     EC2_SSH_KEY   private key for that user (the whole .pem file contents)
-#   … → Variables:
-#     APP_DIR       absolute path of the backend checkout on the server
-#     PM2_APP       pm2 process name or id to reload (defaults to "all")
-#     PORT          port the app listens on (defaults to 3001)
+# Deploys reach the server through AWS Session Manager (no SSH port is open, no IP allow-list):
+# GitHub signs in to AWS with OIDC (no AWS keys stored here) as the role in vars.AWS_DEPLOY_ROLE,
+# which may only open an SSH session to the kynq-prod instance. The commit is pushed straight into
+# the server's repo, so the server never needs GitHub access.
+#
+# One-time setup in GitHub → repo Settings → Secrets and variables → Actions:
+#   Secrets:    EC2_SSH_KEY        private key for ubuntu@kynq-prod (the whole .pem file)
+#   Variables:  AWS_DEPLOY_ROLE    arn:aws:iam::940278682610:role/kynq-github-deploy
+#               EC2_INSTANCE_ID    i-0e25b06afc1ea36b3
+#               APP_DIR            /home/ubuntu/kynq-backend
+#               PM2_APP            kynq-backend (defaults to "all")
+#               PORT               3001 (the default)
 name: Backend CI/CD
 
 on:
@@ -46,34 +49,59 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: production
+    permissions:
+      id-token: write # OIDC sign-in to AWS
+      contents: read
     steps:
-      - name: Deploy over SSH (pull, install, pm2 reload, health check, auto-rollback)
-        uses: appleboy/ssh-action@v1.2.0
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the push to the server needs the history
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE }}
+          aws-region: ap-south-1
+
+      - name: Session Manager plugin
+        run: |
+          curl -fsSLo /tmp/smp.deb https://s3.amazonaws.com/session-manager-downloads/plugin/latest/ubuntu_64bit/session-manager-plugin.deb
+          sudo dpkg -i /tmp/smp.deb >/dev/null
+
+      - name: SSH to the server through Session Manager
+        env:
+          KEY: ${{ secrets.EC2_SSH_KEY }}
+          INSTANCE: ${{ vars.EC2_INSTANCE_ID }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/kynq.pem && chmod 600 ~/.ssh/kynq.pem
+          # The server's host key, pinned (Session Manager names the host by its instance id).
+          echo "$INSTANCE ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHEqnQiAru7B8SsuI8d4TtnLg7fZNE6ku/Mc9dd1Yo5N" >> ~/.ssh/known_hosts
+          cat >> ~/.ssh/config <<EOF
+          Host kynq-prod
+            HostName $INSTANCE
+            User ubuntu
+            IdentityFile ~/.ssh/kynq.pem
+            ProxyCommand aws ssm start-session --target %h --document-name AWS-StartSSHSession --parameters portNumber=%p
+          EOF
+          ssh kynq-prod true
+
+      - name: Deploy (check out, install if needed, pm2 reload, health check, auto-rollback)
         env:
           APP_DIR: ${{ vars.APP_DIR }}
           PM2_APP: ${{ vars.PM2_APP || 'all' }}
           PORT: ${{ vars.PORT || '3001' }}
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          envs: APP_DIR,PM2_APP,PORT
-          command_timeout: 12m
-          script: |
-            set -e
-            # Login shells don't always have nvm/pm2 on PATH over SSH.
-            [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh"
-            cd "$APP_DIR"
-            git fetch --quiet origin main
-            # Always run the deploy script from the commit being deployed.
-            git show origin/main:scripts/deploy.sh > /tmp/kynq-deploy.sh
-            bash /tmp/kynq-deploy.sh
+        run: |
+          git push --force kynq-prod:kynq-backend "$GITHUB_SHA:refs/deploy/next"
+          ssh kynq-prod "DEPLOY_SHA=$GITHUB_SHA APP_DIR='$APP_DIR' PM2_APP='$PM2_APP' PORT='$PORT' bash -s" < scripts/deploy.sh
 
       - name: Public health check
         run: |
+          short=$(git rev-parse --short "$GITHUB_SHA")
           for i in $(seq 1 10); do
-            if curl -fsS --max-time 5 https://api-prod.kynq.in/api/health | tee /dev/stderr | grep -q '"status":"ok"'; then exit 0; fi
+            body=$(curl -fsS --max-time 5 https://api-prod.kynq.in/api/health || true)
+            echo "$body"
+            if [[ "$body" == *'"status":"ok"'* && "$body" == *"\"commit\":\"$short\""* ]]; then exit 0; fi
             sleep 3
           done
-          echo "api-prod.kynq.in is not healthy after deploy" >&2
+          echo "api-prod.kynq.in is not serving $short" >&2
           exit 1

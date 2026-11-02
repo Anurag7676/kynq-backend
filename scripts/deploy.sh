@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
-# Production deploy, run ON the EC2 box by .github/workflows/deploy.yml (over SSH).
-# Can also be run by hand:  APP_DIR=~/kynq-backend PM2_APP=all bash scripts/deploy.sh
+# Production deploy, run ON the EC2 box by .github/workflows/deploy.yml (over SSH through AWS
+# Session Manager). The workflow first pushes the commit into this repo as refs/deploy/next, so the
+# server never needs GitHub access. By hand, from a checkout with `ssh kynq-prod` set up:
+#   git push kynq-prod:kynq-backend HEAD:refs/deploy/next --force
+#   ssh kynq-prod "DEPLOY_SHA=$(git rev-parse HEAD) APP_DIR=\$HOME/kynq-backend PM2_APP=kynq-backend bash -s" < scripts/deploy.sh
 #
-#   1. fast-forward to origin/main (refuses if the server has diverged — never force)
+#   1. check out DEPLOY_SHA (tracked files only: .env, node_modules and other ignored files stay)
 #   2. npm ci, only when package-lock.json changed
 #   3. pm2 reload with GIT_COMMIT set, so /api/health reports what's running
 #   4. wait for /api/health to say ok AND report the new commit
@@ -10,6 +13,7 @@
 set -Eeuo pipefail
 
 APP_DIR="${APP_DIR:?set APP_DIR to the backend checkout on the server}"
+DEPLOY_SHA="${DEPLOY_SHA:?set DEPLOY_SHA to the commit to deploy (pushed as refs/deploy/next)}"
 PM2_APP="${PM2_APP:-all}"
 PORT="${PORT:-3001}"
 HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:${PORT}/api/health}"
@@ -18,17 +22,20 @@ HEALTH_TRIES="${HEALTH_TRIES:-30}" # × 2s
 log() { echo "[deploy $(date -u +%H:%M:%S)] $*"; }
 
 cd "$APP_DIR"
-PREV="$(git rev-parse HEAD)"
-git fetch --quiet origin main
-NEXT="$(git rev-parse origin/main)"
+# Empty on the very first deploy (the files were copied in before this repo had commits).
+PREV="$(git rev-parse -q --verify HEAD || true)"
+NEXT="$(git rev-parse --verify "${DEPLOY_SHA}^{commit}")"
 if [ "$PREV" = "$NEXT" ]; then log "already on ${NEXT:0:7}, nothing to do"; exit 0; fi
-log "deploying ${PREV:0:7} → ${NEXT:0:7}"
+log "deploying ${PREV:0:7}${PREV:+ }→ ${NEXT:0:7}"
 
-install_if_needed() { # $1 = commit we came from
-  if ! git diff --quiet "$1" HEAD -- package-lock.json package.json; then
-    log "dependencies changed, running npm ci"
-    npm ci --omit=dev --no-audit --no-fund
+install_if_needed() { # $1 = commit we came from (empty: first deploy)
+  if [ -z "$1" ]; then
+    [ -d node_modules ] && return 0 # first deploy over an installed copy
+  elif git diff --quiet "$1" HEAD -- package-lock.json package.json; then
+    return 0
   fi
+  log "dependencies changed, running npm ci"
+  npm ci --omit=dev --no-audit --no-fund
 }
 
 reload() {
@@ -50,6 +57,7 @@ healthy() { # $1 = short commit expected in the health payload
 rollback() {
   trap - ERR
   set +e
+  if [ -z "$PREV" ]; then log "FAILED on the first deploy, nothing to roll back to — check pm2 logs now"; exit 1; fi
   log "ROLLING BACK to ${PREV:0:7}"
   git reset --quiet --hard "$PREV"
   install_if_needed "$NEXT"
@@ -59,7 +67,7 @@ rollback() {
 }
 trap rollback ERR
 
-git merge --ff-only --quiet origin/main
+git reset --quiet --hard "$NEXT"
 install_if_needed "$PREV"
 reload
 trap - ERR
