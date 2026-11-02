@@ -9,6 +9,7 @@ import { SECTIONS } from "./sections.js";
 import { listSubadmins, upsertSubadmin, revokeSubadmin } from "./subadmins.js";
 import { overview, analytics, finance } from "./stats.js";
 import { listReports, reviewReport } from "./moderation.js";
+import { listModelBlocks, modelBlockDetail, modelBlockFrame, unblockModel } from "./modelBlocks.js";
 import { listUsers, getUser, restrictUser, revealEmail, setAmbassador, creditWallet } from "./users.js";
 import { listAmbassadors, ambassadorDetail, listGoodieTiers, addGoodieTier, removeGoodieTier } from "./ambassadors.js";
 import { createCampus, listCampusLinks, campusLinkDetail, campusOverview } from "./campusLinks.js";
@@ -87,6 +88,11 @@ router.get("/traffic", requireSection("traffic"), guard(async (req, res) => ok(r
 
 router.get("/reports", requireSection("moderation"), guard(async (req, res) => ok(res, await listReports(req.query))));
 router.post("/reports/:id/review", requireSection("moderation"), guard(async (req, res) => ok(res, { report: await reviewReport(req.params.id, req.body || {}, req.admin) })));
+// People the nudity model acted on, the evidence, and undo.
+router.get("/model-blocks", requireSection("moderation"), guard(async (req, res) => ok(res, await listModelBlocks(req.query))));
+router.get("/model-blocks/frame/:eventId", requireSection("moderation"), guard(async (req, res) => ok(res, await modelBlockFrame(req.params.eventId, req.admin))));
+router.get("/model-blocks/:id", requireSection("moderation"), guard(async (req, res) => ok(res, { person: await modelBlockDetail(req.params.id) })));
+router.post("/model-blocks/:id/unblock", requireSection("moderation"), guard(async (req, res) => ok(res, { person: await unblockModel(req.params.id, { clearStrikes: req.body?.clearStrikes !== false }, req.admin) })));
 
 router.get("/users", requireSection("users"), guard(async (req, res) => ok(res, await listUsers(req.query))));
 router.get("/users/:id", requireSection("users"), guard(async (req, res) => { const d = await getUser(req.params.id); return d ? ok(res, d) : notFound(res, "user not found"); }));
