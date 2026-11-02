@@ -10,25 +10,34 @@
 //
 // What happens (all thresholds live here, nothing is decided by the client):
 //   nsfw >= HIGH  → the device must send the frame; the server re-scores it in its own thread.
-//                   Confirmed (server nsfw >= CONFIRM):
+//                   It counts as EVIDENCE only if the server's own Porn score is >= PORN_EVIDENCE.
+//                   Nothing happens to the call or the account on one frame: only once there are
+//                   FRAMES_TO_ACT evidence frames of that person in this call, at least
+//                   EVIDENCE_SPAN_MS apart (real nudity lasts; a model misfire on one odd frame —
+//                   skin, a shirtless guy, a close-up, bad light — doesn't):
 //                     · the call ends for both, each told why (mod:action)
 //                     · self-detected, or peer-detected and corroborated (their own camera also
 //                       scored >= MEDIUM in this call, or a second person confirmed them within
 //                       24 h): a strike → locked out 24 h, then 7 days, then permanently
-//                     · peer-detected only: 1 h cool-down (a single reporter can't get someone
-//                       banned on their own) and it's kept for review
+//                     · peer-detected only: no lockout at all (one viewer's device can't get
+//                       anyone locked out); kept for review
 //   MEDIUM..HIGH  → logged (the watcher's device already blurred it)
+//
+// History: the first version acted on ONE frame scored Porn+Hentai >= 0.7 by the same model the
+// device runs, and a viewer-only report locked people out for 1 h. In its first days it locked out
+// thousands of users, most by a single borderline frame (0.7–0.9) — far too many false bans.
 // Frames are kept 7 days for review, then deleted automatically (TTL index).
 import crypto from "node:crypto";
 import { Worker } from "node:worker_threads";
 import mongoose from "mongoose";
 
-export const NSFW_HIGH = 0.85;
-export const NSFW_MEDIUM = 0.55;
-export const NSFW_CONFIRM = 0.7;
+export const NSFW_HIGH = 0.92;
+export const NSFW_MEDIUM = 0.75;
+export const PORN_EVIDENCE = 0.92;
+export const FRAMES_TO_ACT = 2;
+export const EVIDENCE_SPAN_MS = 3000;
 const HOUR = 3_600_000;
 const STRIKE_LADDER_MS = [24 * HOUR, 7 * 24 * HOUR, Infinity];
-const PEER_ONLY_COOLDOWN_MS = HOUR;
 const STRIKE_WINDOW_MS = 90 * 24 * HOUR;
 const KEEP_MS = 7 * 24 * HOUR;
 const MAX_FRAME_B64 = 200_000;
@@ -115,17 +124,18 @@ async function selfFlaggedInCall(subject, callId) {
 
 // Per-socket flood guard (a device scans every 1–2 s; anything faster is not our client).
 const lastAt = new Map();
+// A person is acted on at most once per call, even if two evidence frames land at the same moment.
+const actedOn = new Set();
 
 /**
  * One score from a device. `endForModeration(callId, offenderId)` is provided by signaling.
  * Returns the ack payload.
  */
-export async function handleScore({ socket, scopedId, payload, endForModeration, score = scoreFrame }) {
+export async function handleScore({ socket, scopedId, payload, endForModeration, score = scoreFrame, now = Date.now() }) {
   await ensureModerationIndexes();
   const { callId, kind, scores, frame } = payload ?? {};
   if (!callId || callId !== socket.data.currentCallId) return { ok: false, reason: "not in that call" };
   if (kind !== "self" && kind !== "peer") return { ok: false, reason: "bad kind" };
-  const now = Date.now();
   if (now - (lastAt.get(socket.id) ?? 0) < 400) return { ok: false, reason: "too fast" };
   lastAt.set(socket.id, now);
 
@@ -147,13 +157,26 @@ export async function handleScore({ socket, scopedId, payload, endForModeration,
   let serverScores = null;
   try { serverScores = await score(b64); } catch (err) { console.error("[moderation] server score failed:", err.message); }
   const serverNsfw = nsfwOf(serverScores);
-  const confirmed = serverScores ? serverNsfw >= NSFW_CONFIRM : false;
+  // Evidence = the server's own Porn score (Hentai is for drawings; Porn+Hentai over-counted).
+  const confirmed = (Number(serverScores?.Porn) || 0) >= PORN_EVIDENCE;
   const id = crypto.randomUUID();
   await col("moderation_events").insertOne({ ...base, _id: id, level: "high", frame: b64, serverScores, serverNsfw, confirmed });
-  console.log(`[moderation] high ${kind} subject=${subject} reporter=${scopedId} client=${nsfw.toFixed(2)} server=${serverScores ? serverNsfw.toFixed(2) : "n/a"} confirmed=${confirmed}`);
+  console.log(`[moderation] high ${kind} subject=${subject} reporter=${scopedId} client=${nsfw.toFixed(2)} server=${serverScores ? serverNsfw.toFixed(2) : "n/a"} evidence=${confirmed}`);
   if (!confirmed) return { ok: true, confirmed: false };
 
-  // Confirmed nudity: end the call now, then lock out per the ladder.
+  // One frame is never enough: wait for FRAMES_TO_ACT evidence frames of this person in this call,
+  // spread over at least EVIDENCE_SPAN_MS (the watcher's device keeps it hidden meanwhile).
+  const evidence = await col("moderation_events").find({ subject, callId, level: "high", confirmed: true }, { projection: { at: 1 } }).sort({ at: 1 }).toArray();
+  if (evidence.length < FRAMES_TO_ACT || now - evidence[0].at < EVIDENCE_SPAN_MS) {
+    await col("moderation_events").updateOne({ _id: id }, { $set: { action: "evidence_pending" } });
+    return { ok: true, confirmed: true, pending: true };
+  }
+
+  // Enough evidence: end the call now, then lock out per the ladder.
+  const key = `${callId}:${subject}`;
+  if (actedOn.has(key)) return { ok: true, confirmed: true };
+  actedOn.add(key);
+  setTimeout(() => actedOn.delete(key), 10 * 60_000).unref?.();
   await endForModeration(callId, subject).catch((err) => console.error("[moderation] end call failed:", err.message));
   const strong = kind === "self" || (await selfFlaggedInCall(subject, callId)) || (await otherConfirmedReporter(subject, scopedId));
   if (strong) {
@@ -163,8 +186,8 @@ export async function handleScore({ socket, scopedId, payload, endForModeration,
     await col("moderation_events").updateOne({ _id: id }, { $set: { action: ms === Infinity ? "banned" : `locked_${Math.round(ms / HOUR)}h` } });
     await lockOut(subject, ms, "nudity");
   } else {
-    await col("moderation_events").updateOne({ _id: id }, { $set: { action: "cooldown_1h", needsReview: true } });
-    await lockOut(subject, PEER_ONLY_COOLDOWN_MS, "nudity_reported");
+    // Seen only by the person watching: the call ends (they're protected), nobody is locked out.
+    await col("moderation_events").updateOne({ _id: id }, { $set: { action: "ended_peer_only", needsReview: true } });
   }
   return { ok: true, confirmed: true };
 }
