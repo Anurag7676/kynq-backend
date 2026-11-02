@@ -321,11 +321,34 @@ export async function runMatchTick(io) {
   explainStuck([...queue.values()].sort((a, b) => a.joinedAt - b.joinedAt), blockedPairs, recentPairs, Date.now());
 }
 
+// One match pass at a time (a pass awaits the database, and two overlapping passes could pair the
+// same person twice). A pass asked for while one is running runs once more right after it.
+let passRunning = false;
+let passAgain = false;
+async function runMatchPass(io) {
+  if (passRunning) { passAgain = true; return; }
+  passRunning = true;
+  try {
+    do {
+      passAgain = false;
+      await runMatchTick(io).catch((err) => console.error("[kynqExtra:matchmaker] tick error:", err));
+    } while (passAgain);
+  } finally {
+    passRunning = false;
+  }
+}
+
+// Someone just joined: match them now instead of on the next tick (up to TICK_MS of dead time per
+// match). Joins within a few ms of each other share one pass.
+let soonHandle = null;
+export function matchSoon(io) {
+  if (soonHandle) return;
+  soonHandle = setTimeout(() => { soonHandle = null; void runMatchPass(io); }, 15);
+}
+
 export function startMatchmaker(io) {
   if (tickHandle) return;
-  tickHandle = setInterval(() => {
-    runMatchTick(io).catch((err) => console.error("[kynqExtra:matchmaker] tick error:", err));
-  }, TICK_MS);
+  tickHandle = setInterval(() => void runMatchPass(io), TICK_MS);
 }
 
 export function stopMatchmaker() {

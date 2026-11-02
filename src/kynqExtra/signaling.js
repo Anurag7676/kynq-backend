@@ -341,6 +341,7 @@ export function initSignaling(server) {
         });
         console.log(`[kynqExtra] queue:join  scopedId=${scopedId} city=${socket.data.city ?? "-"} scope=${payload.locationScope ?? "worldwide"} topics=${(payload.topics ?? []).join(",") || "-"} queueDepth=${matchmaker.queueDepth()}`);
         ack?.({ ok: true });
+        matchmaker.matchSoon(io);
       } catch (err) {
         console.log(`[kynqExtra] queue:join ERROR scopedId=${scopedId} ${err.message}`);
         ack?.({ ok: false, reason: err.message });
