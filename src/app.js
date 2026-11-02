@@ -120,11 +120,11 @@ const authLimiter = rateLimit({
   message: { success: false, message: "Too many attempts, please try again later" },
 });
 
-const generalLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: isDev ? 10000 : 200,
-  message: { success: false, message: "Too many requests, please try again later" },
-});
+// Off for now: Indian mobile networks put many people behind one IP (carrier-grade NAT), and a
+// per-IP budget of 200 requests / 15 min was refusing real users — including the Google sign-in
+// config call, which left Start matching stuck on "Google sign-in is still loading". The strict
+// limiters above (admin, payments, users) stay. To bring it back, use a per-user or much larger key.
+const generalLimiter = (req, res, next) => next();
 
 // The admin dashboard makes several calls per page view, so it gets its own, roomier limit.
 const consoleLimiter = rateLimit({

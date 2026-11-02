@@ -56,7 +56,9 @@ router.get("/google/config", wrap(async (req, res) => {
   ok(res, { enabled: !!clientId, clientId });
 }));
 
-router.post("/google", otpLimiter, wrap(async (req, res) => {
+// No per-IP limit here: the token is checked with Google, and on shared mobile IPs a 20-per-15-min
+// cap blocked real sign-ins.
+router.post("/google", wrap(async (req, res) => {
   const clientId = process.env.GOOGLE_CLIENT_ID;
   if (!clientId) return res.status(503).json({ success: false, message: "Google sign-in isn't set up yet." });
   const credential = req.body?.credential;   // ID token (the rendered "Continue with Google" button)
