@@ -77,7 +77,10 @@ test("a friend joins with the code; a wrong code and a full duo are refused", db
   assert.equal(b.state.duo.id, duo.id);
   assert.deepEqual(a.state.duo.members.map((m) => m.name).sort(), ["asha", "bilal"]);
   assert.equal(a.state.room.kind, "lobby");
-  assert.equal((await emit(c, "duo:join", { code: "NOPE42" })).ok, false);
+  assert.match(duo.code, /^\d{6}$/);
+  assert.equal((await emit(c, "duo:join", { code: "000000" })).ok, false);
+  // Spaces are fine ("716 341").
+  assert.equal((await emit(c, "duo:join", { code: `${duo.code.slice(0, 3)} ${duo.code.slice(3)}` })).reason, "That duo is already full.");
   assert.match((await emit(c, "duo:join", { code: duo.code })).reason, /full/);
   // Can't search until the duo is complete.
   const solo = await emit(c, "duo:create");

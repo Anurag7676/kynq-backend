@@ -297,7 +297,7 @@ export function initSignaling(server) {
     userSockets.get(scopedId).add(socket.id);
     console.log(`[kynqExtra] connected  scopedId=${scopedId} socket=${socket.id} totalSockets=${io.engine.clientsCount}`);
     tryResumeCall(io, socket);
-    attachSquad(io, socket);
+    attachSquad(io, socket, { emitToUser });
 
     socket.on("queue:join", async (payload = {}, ack) => {
       try {

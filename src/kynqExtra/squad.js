@@ -17,6 +17,7 @@ import crypto from "crypto";
 import mongoose from "mongoose";
 import { blockedPairsAmong, pairKey } from "./blocks.js";
 import { getPublicName } from "./profile.js";
+import { areFriends } from "./friends.js";
 import * as matchmaker from "./matchmaker.js";
 
 const MAX_DUO = 2;
@@ -28,7 +29,7 @@ const LEAVE_GRACE_MS = 10_000; // a dropped connection keeps its seat this long
 // Two duos that just pressed Next aren't put straight back together, unless both have waited
 // this long and there's nobody else (a small pool shouldn't strand them).
 const DUO_REMATCH_MS = 20_000;
-const CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"; // no 0/O/1/I/L
+const CODE_DIGITS = 6; // a short number, easy to read out to a friend ("716 341")
 
 const duos = new Map();        // duoId -> { id, code, members: [scopedId], createdAt }
 const duoByCode = new Map();   // code -> duoId
@@ -38,7 +39,7 @@ const roomOf = new Map();      // scopedId -> roomId
 const people = new Map();      // scopedId -> { scopedId, userId, name, socketId }
 const duoQueue = new Map();    // duoId -> joinedAt
 const leaving = new Map();     // scopedId -> timer (grace after a disconnect)
-const lastMet = new Map();     // "duoA|duoB" -> when their call ended
+const lastMet = new Map();     // "duoA|duoB" or "duoA|solo:id" -> when their call ended
 
 let ioRef = null;
 const sqRoom = (roomId) => `sq:${roomId}`;
@@ -46,8 +47,7 @@ const socketOf = (scopedId) => { const p = people.get(scopedId); return p && ioR
 
 function newCode() {
   for (;;) {
-    const bytes = crypto.randomBytes(6);
-    const code = [...bytes].map((b) => CODE_ALPHABET[b % CODE_ALPHABET.length]).join("");
+    const code = String(crypto.randomInt(10 ** (CODE_DIGITS - 1), 10 ** CODE_DIGITS));
     if (!duoByCode.has(code)) return code;
   }
 }
@@ -102,8 +102,9 @@ async function closeCall(roomId, { reason, requeueDuos = true } = {}) {
   if (!room || room.kind !== "call") return;
   rooms.delete(roomId);
   const all = roomMembers(room);
-  const duoUnits = room.units.filter((u) => u.type === "duo").map((u) => u.duoId).sort();
-  if (duoUnits.length === 2) lastMet.set(duoUnits.join("|"), Date.now());
+  // Who just met: the two duos, or the duo and the solo person (not put straight back together).
+  const keys = room.units.map((u) => (u.type === "duo" ? u.duoId : `solo:${u.scopedId}`)).sort();
+  if (keys.length === 2) lastMet.set(keys.join("|"), Date.now());
   ioRef?.to(sqRoom(roomId)).emit("sq:ended", { roomId, reason });
   for (const id of all) bindSocket(id, null);
   for (const u of room.units) {
@@ -168,6 +169,7 @@ async function leaveEverything(scopedId, reason = "left") {
 // ─── Matching ───
 function scheduleTick() { setImmediate(() => void runSquadTick()); }
 let ticking = false;
+let lastExplainAt = 0;
 export async function runSquadTick() {
   if (ticking || !ioRef || !duoQueue.size) return;
   ticking = true;
@@ -179,6 +181,11 @@ export async function runSquadTick() {
     const clash = (a, b) => a.some((x) => b.some((y) => blocked.has(pairKey(x, y))));
     const used = new Set();
 
+    // Why a duo is still waiting, now and then (like the 1:1 matcher's "stuck queue" line).
+    if (waiting.length && Date.now() - lastExplainAt > 20_000 && Date.now() - waiting[0][1] > 15_000) {
+      lastExplainAt = Date.now();
+      console.log(`[squad] waiting duos=${waiting.length} longest=${Math.round((Date.now() - waiting[0][1]) / 1000)}s solosAllowingDuos=${solos.length} queue=${matchmaker.queueDepth()}`);
+    }
     for (const [duoId, joinedAt] of waiting) {
       if (used.has(duoId) || !duoQueue.has(duoId)) continue;
       const mine = duos.get(duoId).members;
@@ -196,7 +203,7 @@ export async function runSquadTick() {
       }
       // 2) a solo person, once the duo has waited a moment for another duo
       if (Date.now() - joinedAt < DUO_ONLY_MS) continue;
-      const solo = solos.find((s) => !used.has(s.scopedId) && !mine.includes(s.scopedId) && !clash(mine, [s.scopedId]));
+      const solo = solos.find((s) => !used.has(s.scopedId) && !mine.includes(s.scopedId) && !clash(mine, [s.scopedId]) && fresh([`solo:${s.scopedId}`, s.joinedAt]));
       if (!solo || !matchmaker.takeForSquad(solo.scopedId)) continue;
       used.add(duoId); used.add(solo.scopedId);
       people.set(solo.scopedId, { scopedId: solo.scopedId, userId: solo.scopedId, name: await nameOf(solo.scopedId), socketId: solo.socketId });
@@ -230,7 +237,7 @@ async function nameOf(scopedId) {
 
 // ─── Wiring ───
 /** Called from signaling's io.on("connection"). */
-export function attachSquad(io, socket) {
+export function attachSquad(io, socket, { emitToUser } = {}) {
   ioRef = io;
   const { scopedId } = socket.data;
   const me = async () => {
@@ -271,7 +278,7 @@ export function attachSquad(io, socket) {
   });
 
   socket.on("duo:join", async ({ code } = {}, ack) => {
-    const duoId = duoByCode.get(String(code ?? "").trim().toUpperCase());
+    const duoId = duoByCode.get(String(code ?? "").replace(/\D/g, ""));
     const duo = duos.get(duoId);
     if (!duo) return ack?.({ ok: false, reason: "That code didn't work. Ask your friend for a new link." });
     if (duo.members.includes(scopedId)) return ack?.({ ok: true, state: stateFor(scopedId) });
@@ -290,6 +297,16 @@ export function attachSquad(io, socket) {
     console.log(`[squad] duo:join duoId=${duo.id} by=${scopedId}`);
     pushState(duo.members);
     ack?.({ ok: true, state: stateFor(scopedId) });
+  });
+
+  // Invite a friend from your friends list: they get a "join my duo" prompt wherever they are.
+  socket.on("duo:invite", async ({ to } = {}, ack) => {
+    const duo = duos.get(duoOf.get(scopedId));
+    if (!duo || typeof to !== "string" || to === scopedId) return ack?.({ ok: false, reason: "make a duo first" });
+    if (duo.members.length >= MAX_DUO) return ack?.({ ok: false, reason: "your duo is already full" });
+    if (!(await areFriends(scopedId, to).catch(() => false))) return ack?.({ ok: false, reason: "you can only invite friends" });
+    emitToUser?.(to, "duo:invited", { code: duo.code, from: { id: scopedId, name: people.get(scopedId)?.name ?? "A friend" } });
+    ack?.({ ok: true });
   });
 
   socket.on("duo:queue", (_p, ack) => {
