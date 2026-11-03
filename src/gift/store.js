@@ -5,8 +5,20 @@
 import mongoose from "mongoose";
 import crypto from "crypto";
 
+// Every lookup is by `_key`, so each collection needs that index. Atlas used to add it on
+// its own (the "_key_1_autocreated" name); self-hosted Mongo doesn't, and without it every
+// get/set is a full collection scan. Created once per collection per process, in the background.
+const keyIndexed = new Set();
 function coll(name) {
-  return mongoose.connection.collection(name);
+  const c = mongoose.connection.collection(name);
+  if (!keyIndexed.has(name) && mongoose.connection.readyState === 1) {
+    keyIndexed.add(name);
+    c.createIndex({ _key: 1 }, { name: "_key_1_autocreated" }).catch((err) => {
+      keyIndexed.delete(name);
+      console.error(`[store] _key index on ${name}:`, err.message);
+    });
+  }
+  return c;
 }
 
 function strip(doc) {
