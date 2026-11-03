@@ -14,6 +14,7 @@ function coll(name) {
   if (!keyIndexed.has(name) && mongoose.connection.readyState === 1) {
     keyIndexed.add(name);
     c.createIndex({ _key: 1 }, { name: "_key_1_autocreated" }).catch((err) => {
+      if (err.code === 85) return; // already indexed under another name (e.g. "_key_1"): fine
       keyIndexed.delete(name);
       console.error(`[store] _key index on ${name}:`, err.message);
     });
