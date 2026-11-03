@@ -30,6 +30,7 @@ import { ensureCallsIndexes } from "./calls-store.js";
 import { startPairQuestions, stopPairQuestions, pickPairAnswer, skipPairQuestion } from "./pair-question-live.js";
 import { recordNudgeEvent, ensureNudgeEventIndexes } from "./nudge-events.js";
 import { handleScore as handleModerationScore, ensureModerationIndexes, warmModeration } from "./moderation.js";
+import { attachSquad, startSquad, isInSquad, removeFromSquad, inSquadCall, endSquadForModeration } from "./squad.js";
 
 // scopedId -> Set<socketId>, so REST routes (friend requests, DMs) can push
 // realtime events to a user wherever they are in the app.
@@ -142,6 +143,7 @@ function scheduleGraceEnd(io, scopedId, callId, peerScopedId) {
 export async function kickUser(scopedId) {
   const io = ioRef;
   matchmaker.leaveQueue(scopedId);
+  await removeFromSquad(scopedId).catch((err) => console.error("[kynqExtra] kick: squad removal failed:", err.message));
   if (!io) return { sockets: 0 };
 
   // A call parked in the reconnect grace period has no live socket to find, so end it directly.
@@ -295,6 +297,7 @@ export function initSignaling(server) {
     userSockets.get(scopedId).add(socket.id);
     console.log(`[kynqExtra] connected  scopedId=${scopedId} socket=${socket.id} totalSockets=${io.engine.clientsCount}`);
     tryResumeCall(io, socket);
+    attachSquad(io, socket);
 
     socket.on("queue:join", async (payload = {}, ack) => {
       try {
@@ -309,6 +312,8 @@ export function initSignaling(server) {
           console.log(`[kynqExtra] queue:join while attached to callId=${socket.data.currentCallId} scopedId=${scopedId}: ending it first`);
           await leaveActiveCall(io, socket, "ended_by_user");
         }
+        // Searching on your own means leaving any duo / group call first.
+        if (isInSquad(scopedId)) await removeFromSquad(scopedId);
 
         socket.data.city = typeof payload.location?.city === "string" ? payload.location.city.slice(0, 40) : null;
         // Gender preference (Master Spec v3 §5) is a paid extra. The seeker's
@@ -338,6 +343,7 @@ export function initSignaling(server) {
           location: payload.location,
           gender: myProfile?.gender ?? null,
           genderPref: wanted,
+          squadOk: payload.squadOk === true,
         });
         console.log(`[kynqExtra] queue:join  scopedId=${scopedId} city=${socket.data.city ?? "-"} scope=${payload.locationScope ?? "worldwide"} topics=${(payload.topics ?? []).join(",") || "-"} queueDepth=${matchmaker.queueDepth()}`);
         ack?.({ ok: true });
@@ -626,7 +632,12 @@ export function initSignaling(server) {
     // Nudity protection: a score from this device (its own camera, or the video it receives).
     socket.on("mod:score", async (payload, ack) => {
       try {
-        ack?.(await handleModerationScore({ socket, scopedId, payload, endForModeration: (c, o) => endForModeration(io, c, o) }));
+        const group = typeof payload?.callId === "string" && payload.callId.startsWith("sqc_");
+        ack?.(await handleModerationScore(group ? {
+          socket, scopedId, payload,
+          groupSubject: (kind, p) => { const subject = kind === "self" ? scopedId : p.subject; return typeof subject === "string" && inSquadCall(scopedId, p.callId, subject) ? subject : null; },
+          endForModeration: (c, o) => endSquadForModeration(c, o),
+        } : { socket, scopedId, payload, endForModeration: (c, o) => endForModeration(io, c, o) }));
       } catch (err) {
         console.error("[moderation] mod:score failed:", err.message);
         ack?.({ ok: false, reason: "couldn't check that" });
@@ -679,6 +690,7 @@ export function initSignaling(server) {
   });
 
   matchmaker.startMatchmaker(io);
+  startSquad(io);
   startStaleCallSweep(io);
   return io;
 }

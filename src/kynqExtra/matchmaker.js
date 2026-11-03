@@ -46,7 +46,7 @@ const RECENT_RELAX_MS = 45_000;
 const queue = new Map();
 let tickHandle = null;
 
-export function joinQueue({ scopedId, socketId, topics, locationScope, location, gender, genderPref }) {
+export function joinQueue({ scopedId, socketId, topics, locationScope, location, gender, genderPref, squadOk }) {
   // A repeat join (the client can join from the home page AND from the room for one
   // click, or re-join after a reconnect) must NOT restart the person's wait: every
   // wait-based rule (widening, rematch after 45s, the demo fallback) is measured from
@@ -60,6 +60,9 @@ export function joinQueue({ scopedId, socketId, topics, locationScope, location,
     location: LOCATION_FILTER_ENABLED ? (location ?? {}) : {}, // { city, state, country } — best-effort, from client/IP
     gender: gender ?? null,         // from the saved profile (server-side)
     genderPref: genderPref ?? null, // paid extra; null = anyone
+    // May be matched into a duo's group call (squad.js). Only web clients that can show a group
+    // call send it, and never with a gender preference (that was paid for a 1:1 match).
+    squadOk: !!squadOk && !genderPref,
     joinedAt,
   });
 }
@@ -77,6 +80,24 @@ export function leaveQueue(scopedId) {
 export function isQueued(scopedId) {
   return queue.has(scopedId);
 }
+
+/** Solo people a waiting duo may take (squad.js), longest-waiting first. */
+export function squadCandidates() {
+  return [...queue.values()].filter((e) => e.squadOk).sort((a, b) => a.joinedAt - b.joinedAt);
+}
+
+/** Moves a solo person from the 1:1 queue into a duo's call. False if they're no longer free. */
+export function takeForSquad(scopedId) {
+  const e = queue.get(scopedId);
+  if (!e?.squadOk) return false;
+  queue.delete(scopedId);
+  return true;
+}
+
+// Duo mode (squad.js) runs first on every pass, so a duo that has waited gets first pick of the
+// solo people who allow duos; otherwise a fast 1:1 match would always take them first.
+let beforeTick = null;
+export function setBeforeTick(fn) { beforeTick = fn; }
 
 export function queueDepth() {
   return queue.size;
@@ -224,6 +245,7 @@ function explainStuck(waiting, blockedPairs, recentPairs, now) {
 // Exported for tests / manual triggering; the running server calls this on
 // a timer via startMatchmaker().
 export async function runMatchTick(io) {
+  if (beforeTick) await beforeTick().catch((err) => console.error("[kynqExtra:matchmaker] squad pass failed:", err.message));
   const waiting = [...queue.values()].sort((a, b) => a.joinedAt - b.joinedAt);
   const matchedThisTick = new Set();
 
@@ -273,6 +295,11 @@ export async function runMatchTick(io) {
       }
     }
 
+    // A duo may have taken one of them (squad.js) while the charge above was awaited.
+    if (!queue.has(entry.scopedId) || !queue.has(match.scopedId)) {
+      for (const id of charge.paid ?? []) await credit(id, "gender_preference_refund", { refId: charge.chargeId, amount: ECONOMY.genderPreference.price, note: "match didn't go ahead — refunded" }).catch(() => {}); // eslint-disable-line no-await-in-loop
+      continue;
+    }
     matchedThisTick.add(entry.scopedId);
     matchedThisTick.add(match.scopedId);
     queue.delete(entry.scopedId);

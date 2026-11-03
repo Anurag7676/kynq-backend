@@ -131,15 +131,16 @@ const actedOn = new Set();
  * One score from a device. `endForModeration(callId, offenderId)` is provided by signaling.
  * Returns the ack payload.
  */
-export async function handleScore({ socket, scopedId, payload, endForModeration, score = scoreFrame, now = Date.now() }) {
+export async function handleScore({ socket, scopedId, payload, endForModeration, score = scoreFrame, now = Date.now(), groupSubject }) {
   await ensureModerationIndexes();
   const { callId, kind, scores, frame } = payload ?? {};
-  if (!callId || callId !== socket.data.currentCallId) return { ok: false, reason: "not in that call" };
+  // A group call (squad.js) names who the score is about; groupSubject checks both are in it.
+  if (!callId || (!groupSubject && callId !== socket.data.currentCallId)) return { ok: false, reason: "not in that call" };
   if (kind !== "self" && kind !== "peer") return { ok: false, reason: "bad kind" };
   if (now - (lastAt.get(socket.id) ?? 0) < 400) return { ok: false, reason: "too fast" };
   lastAt.set(socket.id, now);
 
-  const subject = kind === "self" ? scopedId : socket.data.peerScopedId;
+  const subject = groupSubject ? groupSubject(kind, payload) : kind === "self" ? scopedId : socket.data.peerScopedId;
   if (!subject) return { ok: false, reason: "no peer" };
   const nsfw = nsfwOf(scores);
   if (nsfw < NSFW_MEDIUM) return { ok: true };
