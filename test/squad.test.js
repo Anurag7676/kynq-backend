@@ -196,3 +196,21 @@ test("the invite list only shows friends who are online and free", db, async () 
   assert.deepEqual(list, []);
   for (const x of [d, e, g]) await emit(x, "duo:leave");
 });
+
+test("a re-sync from a live connection doesn't reset the call; a real reconnect does", db, async () => {
+  const a = await device("asha"), b = await device("bilal");
+  await makeDuo(a, b);
+  const backs = () => b.events.filter((x) => x.ev === "sq:peer-back").length;
+  const first = await emit(a, "sq:sync");
+  await wait(300);
+  assert.equal(backs(), 0, "a plain re-sync must not tell the others to rebuild");
+  assert.equal(first.rejoined, false);
+  // asha's connection drops and a new one syncs inside the grace period.
+  a.s.disconnect();
+  await until(() => b.events.some((x) => x.ev === "sq:peer-away"), 2000, "peer-away");
+  const a2 = await device("asha");
+  const again = await emit(a2, "sq:sync");
+  assert.equal(again.rejoined, true, "the reconnecting side rebuilds too");
+  await until(() => backs() === 1, 2000, "peer-back once");
+  for (const x of [a2, b]) await emit(x, "duo:leave");
+});

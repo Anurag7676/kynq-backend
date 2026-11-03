@@ -248,19 +248,29 @@ export function attachSquad(io, socket, { emitToUser } = {}) {
     return fresh;
   };
   // A reconnecting device takes its seat back (and its socket joins the room again).
+  // True when it really had dropped (a new socket, or inside the leave grace).
   const resume = () => {
     const t = leaving.get(scopedId);
     if (t) { clearTimeout(t); leaving.delete(scopedId); }
-    if (people.has(scopedId)) people.get(scopedId).socketId = socket.id;
+    const p = people.get(scopedId);
     const roomId = roomOf.get(scopedId);
+    // A new socket only counts as "back" if the old one dropped while this room was running
+    // (not, say, a solo person whose earlier /duo page closed before this call began).
+    const back = !!t || (!!p && p.socketId !== socket.id && (p.droppedAt ?? 0) > (rooms.get(roomId)?.startedAt ?? Infinity));
+    if (p) p.socketId = socket.id;
     if (roomId) { socket.join(sqRoom(roomId)); socket.data.squadRoomId = roomId; }
+    return back;
   };
 
+  // Only a device that had actually dropped tells the room it's back (everyone then rebuilds
+  // their connection to it, and it rebuilds its own). A plain re-sync from a live socket must
+  // not: the others would tear down a working connection while this side kept its old one.
   socket.on("sq:sync", async (_p, ack) => {
-    if (people.has(scopedId) || roomOf.has(scopedId) || duoOf.has(scopedId)) { await me(); resume(); }
+    let back = false;
+    if (people.has(scopedId) || roomOf.has(scopedId) || duoOf.has(scopedId)) { back = resume(); await me(); }
     const state = stateFor(scopedId);
-    if (state.room) io.to(sqRoom(state.room.id)).except(socket.id).emit("sq:peer-back", { id: scopedId });
-    ack?.(state);
+    if (back && state.room) io.to(sqRoom(state.room.id)).except(socket.id).emit("sq:peer-back", { id: scopedId });
+    ack?.({ ...state, rejoined: back && !!state.room });
   });
 
   socket.on("duo:create", async (_p, ack) => {
@@ -343,9 +353,11 @@ export function attachSquad(io, socket, { emitToUser } = {}) {
 
   // ─── Relays, only between people in the same room ───
   const sameRoom = (to) => { const r = roomOf.get(scopedId); return r && r === roomOf.get(to); };
-  socket.on("sq:signal", ({ to, type, payload } = {}) => {
+  // sid / tsid: which connection attempt this belongs to (see the client's use-squad.ts).
+  const tag = (v) => (typeof v === "string" && v.length <= 32 ? v : null);
+  socket.on("sq:signal", ({ to, type, payload, sid, tsid, fresh } = {}) => {
     if (typeof to !== "string" || !sameRoom(to)) return;
-    socketOf(to)?.emit("sq:signal", { from: scopedId, type, payload });
+    socketOf(to)?.emit("sq:signal", { from: scopedId, type, payload, sid: tag(sid), tsid: tag(tsid), fresh: fresh === true });
   });
   socket.on("sq:media", ({ mic, cam } = {}) => {
     const r = roomOf.get(scopedId);
@@ -361,6 +373,7 @@ export function attachSquad(io, socket, { emitToUser } = {}) {
 
   socket.on("disconnect", () => {
     if (!people.has(scopedId) || people.get(scopedId).socketId !== socket.id) return;
+    people.get(scopedId).droppedAt = Date.now();
     const r = roomOf.get(scopedId);
     if (r) socket.to(sqRoom(r)).emit("sq:peer-away", { id: scopedId });
     if (duoOf.has(scopedId)) { const d = duoOf.get(scopedId); if (duoQueue.has(d)) { duoQueue.delete(d); pushState(duos.get(d)?.members ?? []); } }
