@@ -15,7 +15,8 @@ import { submitReport } from "./reports.js";
 import { blockUser } from "./blocks.js";
 import { sendGift as sendGiftToPeer, GiftError } from "./gifts.js";
 import { attachPulse, recordGift, recordGameWin } from "./pulse.js";
-import { dropOnBlock } from "./friends.js";
+import { dropOnBlock, friendIds } from "./friends.js";
+import { getPublicName } from "./profile.js";
 import crypto from "crypto";
 import { debit, credit, getBalance, InsufficientBalanceError } from "./wallet.js";
 import { recordCallForAmbassadors } from "./ambassador.js";
@@ -30,7 +31,7 @@ import { ensureCallsIndexes } from "./calls-store.js";
 import { startPairQuestions, stopPairQuestions, pickPairAnswer, skipPairQuestion } from "./pair-question-live.js";
 import { recordNudgeEvent, ensureNudgeEventIndexes } from "./nudge-events.js";
 import { handleScore as handleModerationScore, ensureModerationIndexes, warmModeration } from "./moderation.js";
-import { attachSquad, startSquad, isInSquad, removeFromSquad, inSquadCall, endSquadForModeration } from "./squad.js";
+import { attachSquad, startSquad, busyInSquad, isInSquad, removeFromSquad, inSquadCall, endSquadForModeration } from "./squad.js";
 
 // scopedId -> Set<socketId>, so REST routes (friend requests, DMs) can push
 // realtime events to a user wherever they are in the app.
@@ -354,7 +355,22 @@ export function initSignaling(server) {
       }
     });
 
-    socket.on("queue:leave", (payload, ack) => {
+    // Duo: friends you could invite right now — online, and not in a call or a full duo already.
+    socket.on("duo:friends", async (_p, ack) => {
+      try {
+        const free = (await friendIds(scopedId)).filter((id) => {
+          const sids = userSockets.get(id);
+          if (!sids?.size || busyInSquad(id)) return false;
+          return ![...sids].some((sid) => io.sockets.sockets.get(sid)?.data.currentCallId);
+        }).slice(0, 50);
+        const names = await Promise.all(free.map((id) => getPublicName(id).catch(() => null)));
+        ack?.({ ok: true, friends: free.map((id, i) => ({ id, name: names[i]?.name || "Friend" })) });
+      } catch (err) {
+        ack?.({ ok: false, friends: [] });
+      }
+    });
+
+        socket.on("queue:leave", (payload, ack) => {
       matchmaker.leaveQueue(scopedId);
       console.log(`[kynqExtra] queue:leave  scopedId=${scopedId} queueDepth=${matchmaker.queueDepth()}`);
       ack?.({ ok: true });

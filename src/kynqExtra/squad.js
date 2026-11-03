@@ -371,6 +371,9 @@ export function attachSquad(io, socket, { emitToUser } = {}) {
   });
 }
 
+/** Busy for a duo invite: in a group call, or already in a full duo. */
+export const busyInSquad = (scopedId) => rooms.get(roomOf.get(scopedId))?.kind === "call" || (duos.get(duoOf.get(scopedId))?.members.length ?? 0) >= MAX_DUO;
+
 /** In a duo or a group call right now (a 1:1 search takes them out of it first). */
 export const isInSquad = (scopedId) => duoOf.has(scopedId) || roomOf.has(scopedId);
 

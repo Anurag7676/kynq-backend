@@ -172,6 +172,12 @@ export async function countFriends(me) {
 
 /** Every friend with their last message and my unread count, in one aggregation over the
  *  pair's messages (newest first per pair, via the { pairKey, at } index). */
+/** Just the ids of `me`'s friends (no last-message lookup), for frequent checks like Duo's list. */
+export async function friendIds(me) {
+  await ensureFriendIndexes();
+  return (await friendsOf(me)).map((f) => (f.a === me ? f.b : f.a));
+}
+
 export async function listFriends(me) {
   await ensureFriendIndexes();
   const all = await friendsOf(me);

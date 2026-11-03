@@ -177,3 +177,22 @@ test("blocked people are never put in the same call, and a duo member searching 
 test("moderation only accepts reports about people in the same group call", db, async () => {
   assert.equal(squad.inSquadCall("nobody", "sqc_missing", "x"), false);
 });
+
+test("the invite list only shows friends who are online and free", db, async () => {
+  const { pairKey } = await import("../src/kynqExtra/blocks.js");
+  for (const f of ["divya", "esha", "isha"]) {
+    const key = pairKey(users.chen.id, users[f].id);
+    await mongoose.connection.collection("friendships").insertOne({ _key: key, id: key, a: users.chen.id, b: users[f].id, since: Date.now() });
+  }
+  for (const s of sockets) s.disconnect();
+  await wait(300);
+  const c = await device("chen"), d = await device("divya"), e = await device("esha"), g = await device("gopal");
+  // isha is a friend but offline; gopal is online but not a friend.
+  let list = (await emit(c, "duo:friends")).friends.map((x) => x.name).sort();
+  assert.deepEqual(list, ["divya", "esha"]);
+  // divya and esha make a duo together: both busy now.
+  await makeDuo(d, e);
+  list = (await emit(c, "duo:friends")).friends;
+  assert.deepEqual(list, []);
+  for (const x of [d, e, g]) await emit(x, "duo:leave");
+});
