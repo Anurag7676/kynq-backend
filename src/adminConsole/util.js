@@ -122,6 +122,7 @@ export async function setAmbassadorById(id, enrolled) {
 export const displayName = (u) => (u?.name || (u?.email ? u.email.split("@")[0] : null) || "Unknown");
 
 // ─── Indexes (created once, on first use; safe to repeat) ───
+export const CALLS_STATS_INDEX = "calls_stats_covering";
 let indexesReady = null;
 export function ensureConsoleIndexes() {
   indexesReady ??= Promise.all([
@@ -130,6 +131,11 @@ export function ensureConsoleIndexes() {
     col("calls").createIndex({ startedAt: -1 }),
     col("calls").createIndex({ participantA: 1 }),
     col("calls").createIndex({ participantB: 1 }),
+    // Covers every stats query on calls (time range + who + how long + why it ended), so they read only this
+    // index and never load the call documents (with their events) into a small server's memory.
+    col("calls").createIndex({ startedAt: 1, participantA: 1, participantB: 1, endedAt: 1, endReason: 1 }, { name: CALLS_STATS_INDEX }),
+    col("users").createIndex({ isDemoSeed: 1 }),
+    col("auth-sessions").createIndex({ userId: 1 }),
     col("wallet_transactions").createIndex({ createdAt: -1 }),
     col("wallet_transactions").createIndex({ type: 1, createdAt: -1 }),
     col("coin_orders").createIndex({ status: 1, paidAt: -1 }),

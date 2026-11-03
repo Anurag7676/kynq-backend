@@ -5,7 +5,8 @@ import KynqExtraReport from "../models/kynqExtraReportModel.js";
 import { DAY, col, REAL_USER, dayKeys, fillSeries, dayExpr, istDay, istHour, startOfIstDay, cached, usersById, displayName, ensureConsoleIndexes, excludedUserIds } from "./util.js";
 
 const IST_OFFSET = 19_800_000;
-const TTL = 60_000;
+// Served stale-while-revalidate (see cached()), so a longer TTL only means fewer heavy refreshes.
+const TTL = 5 * 60_000;
 
 export const TX_LABEL = {
   chat_minutes: "Chat rewards", first_chat: "First-chat bonus", referral: "Referral rewards", game_win: "Game wins", question_bonus: "Question rewards",
@@ -22,7 +23,7 @@ const toMap = (rows, key = "_id", val = "count") => new Map(rows.map((r) => [r[k
 async function activeUsersSince(since) {
   const rows = await col("calls").aggregate([
     { $match: { startedAt: { $gte: since } } },
-    { $project: { p: ["$participantA", "$participantB"] } },
+    { $project: { _id: 0, p: ["$participantA", "$participantB"] } },
     { $unwind: "$p" },
     { $group: { _id: "$p" } },
     { $count: "n" },
@@ -33,7 +34,7 @@ async function activeUsersSince(since) {
 async function callStats(from, to) {
   const rows = await col("calls").aggregate([
     { $match: { startedAt: { $gte: from, $lte: to } } },
-    { $project: { dur: { $cond: [{ $and: [{ $ne: ["$endedAt", null] }, { $gt: ["$endedAt", 0] }] }, { $subtract: ["$endedAt", "$startedAt"] }, null] } } },
+    { $project: { _id: 0, dur: { $cond: [{ $and: [{ $ne: ["$endedAt", null] }, { $gt: ["$endedAt", 0] }] }, { $subtract: ["$endedAt", "$startedAt"] }, null] } } },
     { $group: { _id: null, total: { $sum: 1 }, avg: { $avg: { $cond: [{ $and: [{ $gt: ["$dur", 1000] }, { $lt: ["$dur", 6 * 3_600_000] }] }, "$dur", null] } } } },
   ]).toArray();
   return { total: rows[0]?.total ?? 0, avgDurationSec: Math.round((rows[0]?.avg ?? 0) / 1000) };
@@ -87,7 +88,7 @@ export function overview({ days, from, to }) {
       // call becomes exactly two rows, so its duration is counted twice: halve the sum.
       col("calls").aggregate([
         { $match: { startedAt: { $gte: from, $lte: to } } },
-        { $project: { d: dayExpr("$startedAt"), p: ["$participantA", "$participantB"], dur: { $cond: [{ $and: [{ $gt: ["$endedAt", "$startedAt"] }, { $lt: [{ $subtract: ["$endedAt", "$startedAt"] }, 6 * 3_600_000] }] }, { $subtract: ["$endedAt", "$startedAt"] }, 0] } } },
+        { $project: { _id: 0, d: dayExpr("$startedAt"), p: ["$participantA", "$participantB"], dur: { $cond: [{ $and: [{ $gt: ["$endedAt", "$startedAt"] }, { $lt: [{ $subtract: ["$endedAt", "$startedAt"] }, 6 * 3_600_000] }] }, { $subtract: ["$endedAt", "$startedAt"] }, 0] } } },
         { $unwind: "$p" },
         { $group: { _id: "$d", people: { $addToSet: "$p" }, ms2: { $sum: "$dur" } } },
         { $project: { people: { $size: "$people" }, ms: { $divide: ["$ms2", 2] } } },
@@ -172,7 +173,7 @@ export async function computeAnalytics({ days, from, to }) {
     // "had a real call" and the D1/D7 retention.
     col("calls").aggregate([
       { $match: { startedAt: { $gte: callsSince } } },
-      { $project: { startedAt: 1, p: ["$participantA", "$participantB"] } },
+      { $project: { _id: 0, startedAt: 1, p: ["$participantA", "$participantB"] } },
       { $unwind: "$p" },
       { $match: { p: { $nin: [null, ""] } } },
       { $group: { _id: "$p", times: { $push: "$startedAt" } } },
@@ -215,7 +216,7 @@ export async function computeAnalytics({ days, from, to }) {
     // Calls in the range: totals, length, per day / hour / weekday (India time), reasons.
     col("calls").aggregate([
       { $match: { startedAt: { $gte: from, $lte: to } } },
-      { $project: {
+      { $project: { _id: 0,
         d: { $toDate: "$startedAt" },
         reason: { $cond: [{ $in: [{ $ifNull: ["$endReason", ""] }, [""]] }, "unknown", "$endReason"] },
         dur: { $cond: [{ $and: [{ $gt: ["$endedAt", 0] }, { $gt: ["$endedAt", "$startedAt"] }] }, { $subtract: ["$endedAt", "$startedAt"] }, null] },
@@ -269,7 +270,7 @@ export async function computeAnalytics({ days, from, to }) {
     const mid = Math.floor(durStats.n / 2);
     const mids = await col("calls").aggregate([
       { $match: { startedAt: { $gte: from, $lte: to } } },
-      { $project: { dur: { $cond: [{ $and: [{ $gt: ["$endedAt", 0] }, { $gt: ["$endedAt", "$startedAt"] }] }, { $subtract: ["$endedAt", "$startedAt"] }, null] } } },
+      { $project: { _id: 0, dur: { $cond: [{ $and: [{ $gt: ["$endedAt", 0] }, { $gt: ["$endedAt", "$startedAt"] }] }, { $subtract: ["$endedAt", "$startedAt"] }, null] } } },
       { $match: VALID_DUR },
       { $sort: { dur: 1 } },
       { $skip: durStats.n % 2 ? mid : mid - 1 },
