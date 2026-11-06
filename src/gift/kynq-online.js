@@ -3,15 +3,19 @@
 //
 //   create  POST https://kynq.online/api/payments/partner          (our coin order → its payment + checkout URL)
 //   status  GET  https://kynq.online/api/payments/partner/<coin_id> (reconcile, used by gatewayStatus)
-//   result  POST https://api.kynq.in/api/webhooks/kynq-online      (kynq.online tells us; routes/webhook-kynq-online.js)
+//   result  POST https://api-prod.kynq.in/api/webhooks/kynq-online (kynq.online tells us; routes/webhook-kynq-online.js)
 //
 // Both directions are signed with one shared secret:
 //   X-KQ-Partner: kynq.in · X-KQ-Timestamp: <ms> · X-KQ-Signature: hex(HMAC-SHA256(secret, `${ts}.${METHOD}.${path}.${body}`))
 // Requests older than 5 minutes are refused.
 //
+// Every payment carries `mode`: "production" | "sandbox", the Cashfree environment it was paid in.
+// Sandbox (test) money never credits Koins on a production server (see kynqOnlinePaymentModeAccepted).
+//
 // Env:
 //   KYNQ_ONLINE_PARTNER_SECRET  the shared secret (kynq.online's KYNQ_IN_PARTNER_SECRET); unset = off
 //   KYNQ_ONLINE_API_URL         default https://kynq.online
+//   KYNQ_ONLINE_ACCEPT_SANDBOX  "on" lets sandbox payments credit even when NODE_ENV=production (staging)
 import crypto from "crypto";
 
 const BASE = (process.env.KYNQ_ONLINE_API_URL || "https://kynq.online").replace(/\/$/, "");
@@ -62,6 +66,15 @@ export async function getKynqOnlinePayment(orderId) {
     if (err.status === 404) return null;
     throw err;
   }
+}
+
+/**
+ * May this payment credit Koins here? On a production server only payments taken in Cashfree's
+ * production mode count, unless KYNQ_ONLINE_ACCEPT_SANDBOX=on. Env is read per call, not at import.
+ */
+export function kynqOnlinePaymentModeAccepted(payment) {
+  if (process.env.NODE_ENV !== "production") return true;
+  return payment?.mode === "production" || process.env.KYNQ_ONLINE_ACCEPT_SANDBOX === "on";
 }
 
 /** Checks a result kynq.online posted to us. `path` is the path it was posted to. */

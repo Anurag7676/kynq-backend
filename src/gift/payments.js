@@ -12,7 +12,7 @@ import { getOrder, markOrderPaid, setOrderStatus } from "./orders-store.js";
 import { sendOrderConfirmationEmail } from "./order-email.js";
 import { cashfreeConfigured, cashfreeMode, createCashfreeOrder, getCashfreeOrder } from "./cashfree.js";
 import { razorpayConfigured, razorpayKeyId, razorpayMode, createRazorpayOrder, getRazorpayOrder } from "./razorpay.js";
-import { kynqOnlineConfigured, createKynqOnlinePayment, getKynqOnlinePayment } from "./kynq-online.js";
+import { kynqOnlineConfigured, createKynqOnlinePayment, getKynqOnlinePayment, kynqOnlinePaymentModeAccepted } from "./kynq-online.js";
 
 const carts = collection("carts");
 
@@ -94,10 +94,18 @@ export async function startKoinPayment({ orderId, amount, customer, description,
 /** Ask the gateway directly about a still-pending order: "paid" | "expired" | null (don't know yet). */
 export async function gatewayStatus(order) {
   if (order?.paymentProvider === "kynq-online" && order.kynqOnlinePaymentId && kynqOnlineConfigured) {
-    // kynq.online checks Cashfree itself before answering; we still match the payment and amount.
+    // kynq.online checks Cashfree itself before answering; we still match the payment, the amount
+    // and (on a production server) that it was real money, not Cashfree sandbox.
     const p = await getKynqOnlinePayment(order.id).catch(() => null);
     if (!p || p.id !== order.kynqOnlinePaymentId) return null;
-    if (p.status === "paid") return Number(p.amount) === Number(order.amount) && p.currency === "INR" ? "paid" : null;
+    if (p.status === "paid") {
+      if (Number(p.amount) !== Number(order.amount) || p.currency !== "INR") return null;
+      if (!kynqOnlinePaymentModeAccepted(p)) {
+        console.error(`[payments] kynq.online reports ${order.id} paid in ${p.mode ?? "unknown"} mode; not crediting on a production server`);
+        return null;
+      }
+      return "paid";
+    }
     return p.status === "expired" ? "expired" : null;
   }
   if (order?.razorpayOrderId && razorpayConfigured) {

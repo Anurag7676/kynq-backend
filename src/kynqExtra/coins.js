@@ -151,6 +151,54 @@ export async function reconcileCoinOrder(order) {
   return order;
 }
 
+// A kynq.online payment whose result never reached us (callback lost, buyer never came back to the
+// page) would leave a paid order pending. Every 10 minutes, ask kynq.online about each pending
+// kynq-online order from the last 72 hours; reconcileCoinOrder credits (once) or expires it.
+const SWEEP_WINDOW_MS = 72 * 60 * 60 * 1000;
+const SWEEP_EVERY_MS = 10 * 60 * 1000;
+const SWEEP_LIMIT = 200;
+let sweepIndexReady = null;
+export async function sweepKynqOnlineOrders() {
+  const c = mongoose.connection.collection("coin_orders");
+  sweepIndexReady ??= c.createIndex({ paymentProvider: 1, status: 1, createdAt: -1 }).catch((err) => { sweepIndexReady = null; throw err; });
+  await sweepIndexReady;
+  const rows = await c
+    .find({ paymentProvider: "kynq-online", status: "pending_payment", createdAt: { $gte: Date.now() - SWEEP_WINDOW_MS } })
+    .sort({ createdAt: -1 }).limit(SWEEP_LIMIT).toArray();
+  const result = { checked: rows.length, paid: 0, cancelled: 0, failed: 0 };
+  for (const { _id, _key, ...order } of rows) {
+    try {
+      const next = await reconcileCoinOrder(order);
+      if (next?.status === "paid") result.paid += 1;
+      else if (next?.status === "cancelled") result.cancelled += 1;
+    } catch (err) {
+      result.failed += 1;
+      console.error(`[coins] kynq.online sweep: ${order.id} failed:`, err.message);
+    }
+  }
+  return result;
+}
+
+let sweepTimer = null;
+export function startKynqOnlineSweep() {
+  if (sweepTimer) return;
+  let running = false; // a slow run (kynq.online timing out) never overlaps the next one
+  const tick = async () => {
+    if (running) return;
+    running = true;
+    try {
+      const r = await sweepKynqOnlineOrders();
+      if (r.paid || r.cancelled || r.failed) console.log("[coins] kynq.online sweep:", JSON.stringify(r));
+    } catch (err) {
+      console.error("[coins] kynq.online sweep failed:", err.message);
+    } finally {
+      running = false;
+    }
+  };
+  sweepTimer = setInterval(tick, SWEEP_EVERY_MS);
+  sweepTimer.unref();
+}
+
 /** A gateway order that can no longer be paid: the coin order is cancelled (no-op unless pending). */
 export async function expireCoinOrder(id, note) {
   const order = await orders.get(id);

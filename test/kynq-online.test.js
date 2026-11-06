@@ -1,6 +1,7 @@
 // Koin card payments taken by kynq.online, with kynq.online stubbed: the signed create call, the
 // redirect, the signed result callback (forged / stale / wrong amount / wrong payment refused),
-// crediting exactly once, reconcile by status check, expiry, and kynq.in's own Cashfree never used.
+// crediting exactly once, reconcile by status check, expiry, refunds, sandbox money refused in
+// production, the sweeper for unreported payments, and kynq.in's own Cashfree never used.
 // Run: MONGO_TEST_URI=mongodb://127.0.0.1:27099/kynq_test npm test
 for (const k of ["EMAIL_USERNAME", "EMAIL_PASSWORD", "ADMIN_EMAIL", "RAZORPAY_KEY_ID", "RAZORPAY_KEY_SECRET"]) process.env[k] = "";
 process.env.CLIENT_URL = "https://kynq.in";
@@ -40,7 +41,7 @@ globalThis.fetch = async (url, opts = {}) => {
     const b = JSON.parse(body);
     const p = online.payments.get(b.reference) ?? {
       id: `kqp_${crypto.randomBytes(16).toString("base64url")}`, reference: b.reference, status: "pending", amount: b.amount,
-      currency: "INR", provider: "cashfree", providerPaymentId: null, paidAt: null,
+      currency: "INR", provider: "cashfree", mode: "sandbox", providerPaymentId: null, paidAt: null,
     };
     p.checkoutUrl = `https://kynq-online.test/pay/?id=${p.id}`;
     online.payments.set(b.reference, p);
@@ -75,10 +76,10 @@ after(async () => {
 });
 
 const balance = () => wallet.getBalance(user.id);
-function callback(event, payment, { ts = String(Date.now()), secret = SECRET } = {}) {
+function callback(event, payment, { ts = String(Date.now()), secret = SECRET, query = "" } = {}) {
   const raw = JSON.stringify({ event, payment });
   const sig = crypto.createHmac("sha256", secret).update(`${ts}.POST./api/webhooks/kynq-online.${raw}`).digest("hex");
-  return realFetch(`${base}/api/webhooks/kynq-online`, {
+  return realFetch(`${base}/api/webhooks/kynq-online${query}`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "X-KQ-Partner": "kynq.in", "X-KQ-Timestamp": ts, "X-KQ-Signature": sig },
     body: raw,
@@ -175,4 +176,71 @@ test("an expired payment cancels the order", db, async () => {
   const { res, payment } = await start("pack_500");
   assert.equal((await callback("payment.expired", { ...payment, status: "expired" })).status, 200);
   assert.equal((await coins.getCoinOrder(res.order.id)).status, "cancelled");
+});
+
+test("a result posted with a query string is still checked over its raw body", db, async () => {
+  const { res, payment } = await start("pack_500");
+  assert.equal((await callback("payment.expired", { ...payment, status: "expired" }, { query: "?retry=1" })).status, 200);
+  assert.equal((await coins.getCoinOrder(res.order.id)).status, "cancelled");
+});
+
+test("on a production server, sandbox money credits nothing; production money does", db, async () => {
+  const saved = { NODE_ENV: process.env.NODE_ENV, KYNQ_ONLINE_ACCEPT_SANDBOX: process.env.KYNQ_ONLINE_ACCEPT_SANDBOX };
+  process.env.NODE_ENV = "production";
+  delete process.env.KYNQ_ONLINE_ACCEPT_SANDBOX;
+  try {
+    const before = await balance();
+    const sandbox = await start("pack_500");
+    const sandboxPaid = { ...sandbox.payment, status: "paid", mode: "sandbox", providerPaymentId: "5550101" };
+    assert.equal((await callback("payment.paid", sandboxPaid)).status, 200);
+    online.payments.set(sandbox.res.order.id, sandboxPaid);
+    assert.equal((await coins.reconcileCoinOrder(await coins.getCoinOrder(sandbox.res.order.id))).status, "pending_payment");
+    assert.equal(await balance(), before, "neither the callback nor the status check credits sandbox money");
+
+    const live = await start("pack_1000");
+    assert.equal((await callback("payment.paid", { ...live.payment, status: "paid", mode: "production", providerPaymentId: "5550102" })).status, 200);
+    assert.equal((await coins.getCoinOrder(live.res.order.id)).status, "paid");
+    assert.equal(await balance(), before + 1000);
+
+    // KYNQ_ONLINE_ACCEPT_SANDBOX=on (a staging server running NODE_ENV=production) lets it through.
+    process.env.KYNQ_ONLINE_ACCEPT_SANDBOX = "on";
+    assert.equal((await coins.reconcileCoinOrder(await coins.getCoinOrder(sandbox.res.order.id))).status, "paid");
+    assert.equal(await balance(), before + 1500);
+  } finally {
+    for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+  }
+});
+
+test("a refund result takes the Koins back once", db, async () => {
+  const { res, payment } = await start("pack_1000");
+  const before = await balance();
+  assert.equal((await callback("payment.paid", { ...payment, status: "paid", providerPaymentId: "5550201" })).status, 200);
+  assert.equal(await balance(), before + 1000);
+
+  const refunded = { ...payment, status: "refunded", providerPaymentId: "5550201" };
+  assert.equal((await callback("payment.refunded", { ...refunded, id: "kqp_someoneelsespayment000" })).status, 200);
+  assert.equal((await callback("payment.refunded", { ...refunded, amount: 1 })).status, 200);
+  assert.equal((await coins.getCoinOrder(res.order.id)).status, "paid", "wrong payment or amount reverses nothing");
+
+  assert.equal((await callback("payment.refunded", refunded)).status, 200);
+  assert.equal((await coins.getCoinOrder(res.order.id)).status, "refunded");
+  assert.equal(await balance(), before);
+  assert.equal((await callback("payment.refunded", refunded)).status, 200);
+  assert.equal(await balance(), before, "a repeated refund result takes nothing more");
+});
+
+test("the sweeper credits a paid order nobody reported, once", db, async () => {
+  const { res, payment } = await start("pack_2500");
+  const before = await balance();
+  await coins.sweepKynqOnlineOrders();
+  assert.equal((await coins.getCoinOrder(res.order.id)).status, "pending_payment");
+
+  online.payments.set(res.order.id, { ...payment, status: "paid", providerPaymentId: "5550301" });
+  const r = await coins.sweepKynqOnlineOrders();
+  assert.ok(r.paid >= 1);
+  assert.equal((await coins.getCoinOrder(res.order.id)).status, "paid");
+  assert.equal(await balance(), before + 2500);
+
+  await coins.sweepKynqOnlineOrders();
+  assert.equal(await balance(), before + 2500);
 });

@@ -6,6 +6,8 @@ import { startRenewalReminders } from "./accounting/core.js";
 import { startAmbassadorAutoApprovals } from "./kynqExtra/ambassadorAutoApprove.js";
 import { startTaskJobs } from "./adminConsole/tasks/notify.js";
 import { stopMatchmaker } from "./kynqExtra/matchmaker.js";
+import { kynqOnlineConfigured } from "./gift/kynq-online.js";
+import { startKynqOnlineSweep } from "./kynqExtra/coins.js";
 
 dotenv.config();
 
@@ -23,6 +25,7 @@ initSignaling(server);
 startRenewalReminders(); // hourly: subscription renewal emails to admins
 startAmbassadorAutoApprovals(); // every 5 min: female applicants approved 1 hour after applying
 startTaskJobs(); // every minute: ticket deadline reminders, batched emails, daily digest
+if (kynqOnlineConfigured) startKynqOnlineSweep(); // every 10 min: settle kynq.online Koin payments nobody reported
 
 const shutdown = (signal) => {
   console.log(`\n${signal} received. Shutting down gracefully…`);

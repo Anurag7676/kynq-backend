@@ -80,7 +80,8 @@ app.set("trust proxy", 1);
 // Skip body parsing for webhook routes to preserve raw body for signature verification
 const RAW_BODY_ROUTES = ["/api/payments/webhook", "/api/webhooks/stripe", "/api/webhooks/cashfree", "/api/webhooks/razorpay", "/api/webhooks/kynq-online"];
 app.use((req, res, next) => {
-  if (RAW_BODY_ROUTES.includes(req.originalUrl)) {
+  // Matched on the path alone: a query string must not send a webhook through the JSON parser.
+  if (RAW_BODY_ROUTES.includes(req.originalUrl.split("?")[0])) {
     next();
     return;
   }
