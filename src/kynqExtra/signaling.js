@@ -21,7 +21,7 @@ import crypto from "crypto";
 import { debit, credit, getBalance, InsufficientBalanceError } from "./wallet.js";
 import { recordCallForAmbassadors } from "./ambassador.js";
 import { ECONOMY, gamePrice, isPaidGenderPreference } from "./economy.js";
-import { getExtraProfile } from "./profile.js";
+import { getExtraProfile, publicCard } from "./profile.js";
 import { activePassExpiry } from "./gender-pass.js";
 import { rewardGameWin } from "./game-rewards.js";
 import { startMeter, markConnected, pauseMeter, endMeter, onReward, ensureChatMeterIndexes } from "./chat-meter.js";
@@ -222,7 +222,7 @@ async function tryResumeCall(io, socket) {
   // a fresh ICE/SDP exchange is the only reliable way to recover a media
   // connection after a signaling drop, rather than assuming the old
   // RTCPeerConnection is still usable).
-  socket.emit("call:resumed", { callId, peerScopedId, initiator: true });
+  socket.emit("call:resumed", { callId, peerScopedId, initiator: true, peer: await publicCard(peerScopedId).catch(() => null) });
   socket.to(callId).emit("call:peer-reconnected", {});
 }
 
@@ -330,7 +330,10 @@ export function initSignaling(server) {
             return ack?.({ ok: false, reason: "not enough Koins for a gender preference", code: "insufficient", balance, price });
           }
         }
-        const myProfile = await getExtraProfile(socket.data.userId).catch(() => null);
+        const [myProfile, card] = await Promise.all([
+          getExtraProfile(socket.data.userId).catch(() => null),
+          publicCard(socket.data.userId).catch(() => null),
+        ]);
 
         // Demo-enabled servers only: load this person's saved demo-wait state (one indexed read)
         // BEFORE they enter the queue, so the matcher's per-second checks never touch the database.
@@ -345,6 +348,7 @@ export function initSignaling(server) {
           gender: myProfile?.gender ?? null,
           genderPref: wanted,
           squadOk: payload.squadOk === true,
+          card,
         });
         console.log(`[kynqExtra] queue:join  scopedId=${scopedId} city=${socket.data.city ?? "-"} scope=${payload.locationScope ?? "worldwide"} topics=${(payload.topics ?? []).join(",") || "-"} queueDepth=${matchmaker.queueDepth()}`);
         ack?.({ ok: true });

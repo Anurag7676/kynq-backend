@@ -46,7 +46,7 @@ const RECENT_RELAX_MS = 45_000;
 const queue = new Map();
 let tickHandle = null;
 
-export function joinQueue({ scopedId, socketId, topics, locationScope, location, gender, genderPref, squadOk }) {
+export function joinQueue({ scopedId, socketId, topics, locationScope, location, gender, genderPref, squadOk, card }) {
   // A repeat join (the client can join from the home page AND from the room for one
   // click, or re-join after a reconnect) must NOT restart the person's wait: every
   // wait-based rule (widening, rematch after 45s, the demo fallback) is measured from
@@ -63,6 +63,7 @@ export function joinQueue({ scopedId, socketId, topics, locationScope, location,
     // May be matched into a duo's group call (squad.js). Only web clients that can show a group
     // call send it, and never with a gender preference (that was paid for a 1:1 match).
     squadOk: !!squadOk && !genderPref,
+    card: card ?? null, // { name, city, state }: shown to whoever they're matched with (profile.publicCard)
     joinedAt,
   });
 }
@@ -338,8 +339,8 @@ export async function runMatchTick(io) {
 
     recordMatch(entry.location?.city, match.location?.city);
     console.log(`[kynqExtra] match:found  callId=${call.id} a=${entry.scopedId} b=${match.scopedId} waitedMsA=${Date.now() - entry.joinedAt} waitedMsB=${Date.now() - match.joinedAt} queueDepth=${queue.size}`);
-    io.to(entry.socketId).emit("match:found", { callId: call.id, peerScopedId: match.scopedId, initiator: true });
-    io.to(match.socketId).emit("match:found", { callId: call.id, peerScopedId: entry.scopedId, initiator: false });
+    io.to(entry.socketId).emit("match:found", { callId: call.id, peerScopedId: match.scopedId, initiator: true, peer: match.card ?? null });
+    io.to(match.socketId).emit("match:found", { callId: call.id, peerScopedId: entry.scopedId, initiator: false, peer: entry.card ?? null });
     // Nudity protection: each side gets its own random snapshot seconds for this call.
     io.to(entry.socketId).emit("mod:shots", { callId: call.id, seconds: shotSchedule() });
     io.to(match.socketId).emit("mod:shots", { callId: call.id, seconds: shotSchedule() });

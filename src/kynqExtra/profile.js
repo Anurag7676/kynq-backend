@@ -162,6 +162,18 @@ export async function isAgeGateCleared(userId) {
 // Minimal, safe-to-expose info about ANOTHER user — just enough for the
 // 7-Day Challenge UI to show who you're challenging instead of a raw id.
 // Deliberately excludes email, dob, and everything else in the account.
+/**
+ * What the other person in a 1:1 call sees about you, like Monkey's name + place line: your first
+ * name and the city / state you chose in your own profile. Nothing else (no full name, no IP
+ * location, no age).
+ */
+export async function publicCard(userId) {
+  const [pub, profile] = await Promise.all([getPublicName(userId).catch(() => null), getExtraProfile(userId).catch(() => null)]);
+  const first = String(pub?.name ?? "").trim().split(/\s+/)[0]?.slice(0, 20) || "";
+  const name = first && first.toLowerCase() !== "someone" ? first.charAt(0).toUpperCase() + first.slice(1) : null;
+  return { name, city: profile?.city ?? null, state: profile?.state ?? null };
+}
+
 export async function getPublicName(userId) {
   const user = await findUserById(userId);
   if (!user) return null;
