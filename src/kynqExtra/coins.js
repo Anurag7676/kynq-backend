@@ -1,4 +1,4 @@
-// Coin packs bought with real money through Cashfree.
+// Coin packs bought with real money through the payment gateway (gift/payments.js: Razorpay).
 //
 // A coin order is its own record (`coin_orders`) with its own id namespace
 // (`coin_…`) — that id is also the Cashfree order_id, so the shared webhook
@@ -13,7 +13,7 @@
 // anything the client sends.
 import mongoose from "mongoose";
 import { collection, makeId } from "../gift/store.js";
-import { cashfreeConfigured, cashfreeMode, createCashfreeOrder, getCashfreeOrder, demoPaymentsAllowed, PAYMENTS_UNAVAILABLE } from "../gift/cashfree.js";
+import { paymentsConfigured, demoPaymentsAllowed, PAYMENTS_UNAVAILABLE, startPayment, gatewayStatus } from "../gift/payments.js";
 import { credit, debit } from "./wallet.js";
 import { recordCreatorCommission, reverseCreatorCommission } from "./creators.js";
 import { assignKoinInvoiceNumber } from "../accounting/core.js";
@@ -62,7 +62,7 @@ export async function createCoinOrder({ user, packId, phone }) {
   if (!pack) throw Object.assign(new Error("unknown pack"), { code: "BAD_PACK" });
 
   // Fail closed BEFORE creating anything: no keys in production = no sale.
-  if (!cashfreeConfigured && !demoPaymentsAllowed) throw Object.assign(new Error(PAYMENTS_UNAVAILABLE), { code: "PAYMENTS_UNAVAILABLE" });
+  if (!paymentsConfigured && !demoPaymentsAllowed) throw Object.assign(new Error(PAYMENTS_UNAVAILABLE), { code: "PAYMENTS_UNAVAILABLE" });
 
   const id = makeId("coin");
   const now = Date.now();
@@ -74,25 +74,26 @@ export async function createCoinOrder({ user, packId, phone }) {
   };
   await orders.set(id, order);
 
-  if (!cashfreeConfigured) {
+  if (!paymentsConfigured) {
     // Demo mode (never in production — see demoPaymentsAllowed).
-    order = await markCoinOrderPaid(id, "demo mode: no Cashfree keys configured");
+    order = await markCoinOrderPaid(id, "demo mode: no payment gateway configured");
     return { order, mode: "demo" };
   }
 
   try {
-    const cf = await createCashfreeOrder({
+    const { refs, client } = await startPayment({
       orderId: id,
       amount: pack.priceInr,
       currency: "INR",
       customer: { id: user.id, name: user.name || "kynq member", email: user.email, phone },
+      description: `${pack.coins} Koins`,
       returnUrl: `${CLIENT_URL}/store/coins?coin_order=${id}`,
     });
-    order = withEvent({ ...order, cashfreeOrderId: cf.order_id, cashfreePaymentSessionId: cf.payment_session_id }, "cashfree_order_created");
+    order = withEvent({ ...order, ...refs }, `${refs.paymentProvider}_order_created`);
     await orders.set(id, order);
-    return { order, mode: "cashfree", cashfreeMode, paymentSessionId: cf.payment_session_id };
+    return { order, ...client };
   } catch (err) {
-    order = withEvent({ ...order, status: "cancelled" }, "cashfree_order_failed", err.message);
+    order = withEvent({ ...order, status: "cancelled" }, "gateway_order_failed", err.message);
     await orders.set(id, order);
     throw Object.assign(new Error("couldn't start payment — try again in a moment"), { code: "PAYMENT_START_FAILED", cause: err });
   }
@@ -133,13 +134,13 @@ export async function markCoinOrderRefunded(id, note) {
   return next;
 }
 
-/** Ask Cashfree directly when a webhook hasn't landed (e.g. localhost). */
+/** Ask the gateway directly when neither the checkout callback nor a webhook has landed. */
 export async function reconcileCoinOrder(order) {
-  if (!cashfreeConfigured || order.status !== "pending_payment" || !order.cashfreeOrderId) return order;
-  const cf = await getCashfreeOrder(order.cashfreeOrderId).catch(() => null);
-  if (cf?.order_status === "PAID") return markCoinOrderPaid(order.id, "reconciled via GET (cashfree order_status=PAID)");
-  if (cf?.order_status === "EXPIRED") {
-    const next = withEvent({ ...order, status: "cancelled" }, "expired", "cashfree order expired");
+  if (order.status !== "pending_payment") return order;
+  const status = await gatewayStatus(order);
+  if (status === "paid") return markCoinOrderPaid(order.id, `reconciled via GET (${order.paymentProvider ?? "gateway"} order paid)`);
+  if (status === "expired") {
+    const next = withEvent({ ...order, status: "cancelled" }, "expired", "gateway order expired");
     await orders.set(order.id, next);
     return next;
   }

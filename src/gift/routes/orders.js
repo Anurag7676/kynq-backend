@@ -1,26 +1,17 @@
 import express from "express";
-import { collection } from "../store.js";
 import { getOrCreateSession, getCurrentUser } from "../session.js";
-import { getOrder, listOrdersForActor, setOrderStatus, markOrderPaid } from "../orders-store.js";
+import { getOrder, listOrdersForActor, setOrderStatus } from "../orders-store.js";
 import { ok, notFound, badRequest, wrap } from "../http.js";
-import { cashfreeConfigured, getCashfreeOrder } from "../cashfree.js";
-import { sendOrderConfirmationEmail } from "../order-email.js";
+import { gatewayStatus, settlePaid } from "../payments.js";
 
 const router = express.Router();
-const carts = collection("carts");
 
 // Reconcile a still-pending order against Cashfree directly. This is the
 // fallback path for when the webhook hasn't landed yet — including local
 // dev, where Cashfree can never reach http://localhost at all.
 async function reconcileIfPending(order) {
-  if (!cashfreeConfigured || order.status !== "pending_payment" || !order.cashfreeOrderId) return order;
-  const cf = await getCashfreeOrder(order.cashfreeOrderId).catch(() => null);
-  if (cf?.order_status === "PAID") {
-    const updated = await markOrderPaid(order.id, "reconciled via GET /orders/:id (cashfree order_status=PAID)");
-    await carts.set(order.sessionId, { sessionId: order.sessionId, items: [], itemCount: 0, subtotal: 0, currency: "INR", updatedAt: Date.now() });
-    sendOrderConfirmationEmail(updated).catch((err) => console.error("[orders] confirmation email failed:", err.message));
-    return updated;
-  }
+  if (order.status !== "pending_payment") return order;
+  if ((await gatewayStatus(order)) === "paid") return (await settlePaid(order.id, `reconciled via GET /orders/:id (${order.paymentProvider ?? "gateway"} order paid)`)) ?? order;
   return order;
 }
 

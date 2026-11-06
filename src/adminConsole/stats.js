@@ -3,6 +3,7 @@
 // counting inside MongoDB so only small summaries leave the database.
 import KynqExtraReport from "../models/kynqExtraReportModel.js";
 import { DAY, col, REAL_USER, dayKeys, fillSeries, dayExpr, istDay, istHour, startOfIstDay, cached, usersById, displayName, ensureConsoleIndexes, excludedUserIds } from "./util.js";
+import { paymentProvider, paymentMode } from "../gift/payments.js";
 
 const IST_OFFSET = 19_800_000;
 // Served stale-while-revalidate (see cached()), so a longer TTL only means fewer heavy refreshes.
@@ -366,8 +367,6 @@ export function finance({ days, from, to }) {
     const revByDay = new Map(revDayRows.map((r) => [r._id, r]));
     const koinByDay = new Map();
     for (const r of koinDayRows) { const e = koinByDay.get(r._id.d) ?? { issued: 0, spent: 0 }; e[r._id.pos ? "issued" : "spent"] += r.amount; koinByDay.set(r._id.d, e); }
-    // Same rule as gift/cashfree.js: anything but "production" is Cashfree's sandbox (test money).
-    const cashfreeEnv = String(process.env.CASHFREE_ENV || "").toLowerCase();
 
     return {
       range: { days, from, to },
@@ -377,7 +376,7 @@ export function finance({ days, from, to }) {
         payers, payingRate: totalUsers ? round(payers / totalUsers, 4) : 0,
         aovInr: paidOrders ? round(gross / paidOrders, 1) : 0,
       },
-      gateway: { mode: cashfreeEnv === "production" ? "live" : "test" },
+      gateway: { provider: paymentProvider, mode: paymentMode },
       series: {
         revenue: fillSeries(keys, revByDay, (date, v) => ({ date, inr: v?.inr ?? 0, orders: v?.orders ?? 0 })),
         koins: fillSeries(keys, koinByDay, (date, v) => ({ date, issued: v?.issued ?? 0, spent: v?.spent ?? 0 })),

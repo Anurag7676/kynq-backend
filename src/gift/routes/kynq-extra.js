@@ -31,6 +31,7 @@ import {
 } from "../../kynqExtra/challenges.js";
 import { auth } from "../../middleware/authMiddleware.js";
 import { activitySummary } from "../../kynqExtra/activity.js";
+import { paymentProvider } from "../payments.js";
 
 const router = express.Router();
 
@@ -280,9 +281,9 @@ router.post("/challenges/:id/moment", wrap(async (req, res) => {
   }
 }));
 
-// ─── Coins — packs bought through Cashfree (see kynqExtra/coins.js). The
-// server owns prices, order state and the wallet credit; the client only
-// picks a pack and completes Cashfree's hosted checkout. ───
+// ─── Coins — packs bought through the payment gateway (Razorpay; see gift/payments.js and
+// kynqExtra/coins.js). The server owns prices, order state and the wallet credit; the client
+// only picks a pack and completes the gateway's checkout. ───
 router.get("/coins/packs", wrap(async (req, res) => {
   ok(res, { packs: listPacks() });
 }));
@@ -292,14 +293,15 @@ router.post("/coins/orders", wrap(async (req, res) => {
   if (!user) return unauthorized(res, "sign in to buy coins");
   const packId = String(req.body?.packId || "");
   const phone = String(req.body?.phone || "").replace(/\s+/g, "");
-  if (!/^\+?\d{10,15}$/.test(phone)) return badRequest(res, "a phone number is required for the payment receipt");
+  // Razorpay asks for the phone in its own checkout; Cashfree (switch-back only) needs it here.
+  if (paymentProvider === "cashfree" && !/^\+?\d{10,15}$/.test(phone)) return badRequest(res, "a phone number is required for the payment receipt");
   try {
     const result = await createCoinOrder({ user, packId, phone });
     created(res, result);
   } catch (err) {
     if (err.code === "BAD_PACK") return badRequest(res, "unknown pack");
     if (err.code === "PAYMENTS_UNAVAILABLE") return res.status(503).json({ error: "payments_unavailable", message: err.message });
-    console.error("[coins] order creation failed:", err.message, err.cause?.cashfree);
+    console.error("[coins] order creation failed:", err.message, err.cause?.razorpay ?? err.cause?.cashfree);
     badRequest(res, err.message);
   }
 }));

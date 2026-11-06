@@ -97,7 +97,7 @@ export function koinInvoicePdf({ order, buyer, settings }) {
     const refunded = order.status === "refunded";
     let y = header(doc, {
       title: "Invoice", number: order.invoiceNo, settings, stamp: refunded ? "REFUNDED" : "PAID",
-      rows: [["Date", fmtDate(order.invoiceDate)], ["Order", order.id], ...(order.cashfreeOrderId && order.cashfreeOrderId !== order.id ? [["Payment ref", order.cashfreeOrderId]] : [])],
+      rows: [["Date", fmtDate(order.invoiceDate)], ["Order", order.id], ...((order.razorpayOrderId || order.cashfreeOrderId) && (order.razorpayOrderId || order.cashfreeOrderId) !== order.id ? [["Payment ref", order.razorpayOrderId || order.cashfreeOrderId]] : [])],
     });
     y = parties(doc, y + 6, settings, [buyer.name || "Customer", buyer.email, buyer.phone ? `Phone: ${buyer.phone}` : null]);
     y = table(doc, y, [{ description: `${order.coins} Koins: kynq in-app currency (digital, credited instantly)${settings.gstRegistered && settings.sacCode ? `\nSAC ${settings.sacCode}` : ""}`, qty: 1, rate: order.amount }]);
@@ -110,7 +110,7 @@ export function koinInvoicePdf({ order, buyer, settings }) {
     lines.push(["Total paid", inr(order.amount), true]);
     if (refunded) lines.push(["Refunded", inr(order.amount)]);
     y = totals(doc, y, lines);
-    footer(doc, y, `${settings.invoiceFooter || ""}\nPaid online via Cashfree. Questions: ${settings.email || "hi@kynq.in"}`);
+    footer(doc, y, `${settings.invoiceFooter || ""}\nPaid online. Questions: ${settings.email || "hi@kynq.in"}`);
   });
 }
 

@@ -43,6 +43,8 @@ import giftPairings from "./gift/routes/pairings.js";
 import giftCheckout from "./gift/routes/checkout.js";
 import giftWebhook from "./gift/routes/webhook.js";
 import giftWebhookCashfree from "./gift/routes/webhook-cashfree.js";
+import giftWebhookRazorpay from "./gift/routes/webhook-razorpay.js";
+import razorpayVerify from "./gift/routes/razorpay-verify.js";
 // kynq gift cart/wishlist/auth — session-cookie-scoped, match the frontend's
 // cart-context/auth-context contract exactly (POST /items, PATCH /items/:id,
 // magic-link auth). These supersede the legacy Mongo cartRoutes/wishlistRoutes
@@ -75,7 +77,7 @@ app.set("trust proxy", 1);
 
 // Regular body parsing middleware for most routes
 // Skip body parsing for webhook routes to preserve raw body for signature verification
-const RAW_BODY_ROUTES = ["/api/payments/webhook", "/api/webhooks/stripe", "/api/webhooks/cashfree"];
+const RAW_BODY_ROUTES = ["/api/payments/webhook", "/api/webhooks/stripe", "/api/webhooks/cashfree", "/api/webhooks/razorpay"];
 app.use((req, res, next) => {
   if (RAW_BODY_ROUTES.includes(req.originalUrl)) {
     next();
@@ -143,6 +145,8 @@ app.use("/media", express.static(path.join(__dirname, "../public/media")));
 // here directly.
 app.use("/api/webhooks/stripe", express.raw({ type: "application/json" }), giftWebhook);
 app.use("/api/webhooks/cashfree", express.raw({ type: "application/json" }), giftWebhookCashfree);
+app.use("/api/webhooks/razorpay", express.raw({ type: "application/json" }), giftWebhookRazorpay);
+app.use("/api/razorpay", razorpayVerify);
 
 // API Routes
 app.use("/api/admin", authLimiter, adminRoutes);

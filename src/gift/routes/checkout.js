@@ -3,7 +3,7 @@ import { collection } from "../store.js";
 import { getScopedId, syncProfileFromCheckout } from "../session.js";
 import { computeTotals, createOrder, markOrderPaid, setOrderStatus, updateOrder } from "../orders-store.js";
 import { ok, created, badRequest, unauthorized, wrap } from "../http.js";
-import { cashfreeConfigured, cashfreeMode, createCashfreeOrder, demoPaymentsAllowed, PAYMENTS_UNAVAILABLE } from "../cashfree.js";
+import { paymentsConfigured, paymentProvider, demoPaymentsAllowed, PAYMENTS_UNAVAILABLE, startPayment } from "../payments.js";
 import { sendOrderConfirmationEmail } from "../order-email.js";
 import { evaluateCoupon } from "../coupons.js";
 
@@ -20,8 +20,8 @@ router.post("/session", wrap(async (req, res) => {
   const b = req.body || {};
   if (!b.customer?.name || !b.customer?.email) return badRequest(res, "customer name + email required");
   // Fail closed before an order exists: no keys in production = no sale.
-  if (!cashfreeConfigured && !demoPaymentsAllowed) return res.status(503).json({ error: "payments_unavailable", message: PAYMENTS_UNAVAILABLE });
-  if (cashfreeConfigured && !b.customer?.phone) return badRequest(res, "customer phone required");
+  if (!paymentsConfigured && !demoPaymentsAllowed) return res.status(503).json({ error: "payments_unavailable", message: PAYMENTS_UNAVAILABLE });
+  if (paymentProvider === "cashfree" && !b.customer?.phone) return badRequest(res, "customer phone required");
 
   const { scopedId, userId } = await getScopedId(req, res);
   // Checkout requires an account — enforced here, not just in the UI, since
@@ -72,9 +72,9 @@ router.post("/session", wrap(async (req, res) => {
 
   const successUrl = `${CLIENT_URL}/checkout/confirmation?order=${order.id}`;
 
-  if (!cashfreeConfigured) {
+  if (!paymentsConfigured) {
     // Demo mode — mark paid, clear cart, return confirmation url directly.
-    const paidOrder = await markOrderPaid(order.id, "demo mode: no Cashfree keys configured");
+    const paidOrder = await markOrderPaid(order.id, "demo mode: no payment gateway configured");
     await carts.set(scopedId, { sessionId: scopedId, items: [], itemCount: 0, subtotal: 0, currency: "INR", updatedAt: Date.now() });
     sendOrderConfirmationEmail(paidOrder).catch((err) => console.error("[checkout] confirmation email failed:", err.message));
     return created(res, { url: successUrl, orderId: order.id, mode: "demo" });
@@ -85,23 +85,19 @@ router.post("/session", wrap(async (req, res) => {
   // practice (see computeTotals: non-INR carts get a flat USD shipping add,
   // but kynq only sells in INR today).
   try {
-    const cf = await createCashfreeOrder({
+    const { refs, client } = await startPayment({
       orderId: order.id,
       amount: totals.dueToday,
       currency: totals.currency,
       customer: { id: userId || scopedId, name: b.customer.name, email: b.customer.email, phone: b.customer.phone },
+      description: `kynq order ${order.id}`,
       returnUrl: successUrl,
     });
-    await updateOrder(order.id, { cashfreeOrderId: cf.order_id, cashfreePaymentSessionId: cf.payment_session_id });
-    return created(res, {
-      orderId: order.id,
-      mode: "cashfree",
-      cashfreeMode,
-      paymentSessionId: cf.payment_session_id,
-    });
+    await updateOrder(order.id, refs);
+    return created(res, { orderId: order.id, successUrl, ...client });
   } catch (err) {
-    console.error("[checkout] Cashfree order creation failed:", err.message, err.cashfree);
-    await setOrderStatus(order.id, "cancelled", `cashfree order creation failed: ${err.message}`);
+    console.error("[checkout] gateway order creation failed:", err.message, err.razorpay ?? err.cashfree);
+    await setOrderStatus(order.id, "cancelled", `gateway order creation failed: ${err.message}`);
     return badRequest(res, "couldn't start payment — try again in a moment");
   }
 }));

@@ -1,4 +1,6 @@
 // Cashfree Payment Gateway client — Orders API + webhook signature verification.
+// DISABLED by default: Razorpay is the gateway (see payments.js). Cashfree only runs when
+// PAYMENT_PROVIDER=cashfree is set; old Cashfree orders still settle through its webhook.
 // Docs: https://www.cashfree.com/docs/payments/online/web/redirect
 //       https://www.cashfree.com/docs/api-reference/vrs/webhook-signature-verification
 //
@@ -20,7 +22,7 @@ export const cashfreeConfigured = !!(APP_ID && SECRET_KEY);
 // outside production; in production a missing/mistyped key must fail closed.
 export const demoPaymentsAllowed = !cashfreeConfigured && process.env.NODE_ENV !== "production";
 export const PAYMENTS_UNAVAILABLE = "Payments aren't set up yet. Please try again later.";
-if (!cashfreeConfigured && process.env.NODE_ENV === "production") {
+if (!cashfreeConfigured && process.env.NODE_ENV === "production" && String(process.env.PAYMENT_PROVIDER || "").toLowerCase() === "cashfree") {
   console.error("[cashfree] CASHFREE_APP_ID / CASHFREE_SECRET_KEY are not set — every purchase will be refused until they are.");
 }
 export const cashfreeMode = ENV; // passed to the frontend JS SDK's Cashfree({ mode })
@@ -78,7 +80,7 @@ export async function getCashfreeOrder(orderId) {
 // x-webhook-signature = base64(HMAC-SHA256(x-webhook-timestamp + rawBody, secretKey))
 // Must be computed over the exact raw body, not a re-serialized JSON object.
 export function verifyCashfreeWebhookSignature(rawBody, timestamp, signature) {
-  if (!timestamp || !signature) return false;
+  if (!SECRET_KEY || !timestamp || !signature) return false;
   const expected = crypto
     .createHmac("sha256", SECRET_KEY)
     .update(timestamp + rawBody)
