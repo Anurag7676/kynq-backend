@@ -20,7 +20,7 @@ import { emitToUser } from "../../kynqExtra/signaling.js";
 import { listCallsForUser } from "../../kynqExtra/calls-store.js";
 import { getBalance, getHistory, EARN_RULES } from "../../kynqExtra/wallet.js";
 import { getAmbassador, todayProgress, history, goodiesProgress } from "../../kynqExtra/ambassador.js";
-import { listPacks, createCoinOrder, getCoinOrder, listCoinOrdersForUser, reconcileCoinOrder } from "../../kynqExtra/coins.js";
+import { listPacks, createCoinOrder, getCoinOrder, listCoinOrdersForUser, reconcileCoinOrder, upiDirectEnabled, createUpiCoinOrder, submitUpiUtr } from "../../kynqExtra/coins.js";
 import { getCurrentUser } from "../session.js";
 import { getKoinInvoiceData } from "../../accounting/core.js";
 import { koinInvoicePdf } from "../../accounting/pdf.js";
@@ -285,13 +285,22 @@ router.post("/challenges/:id/moment", wrap(async (req, res) => {
 // kynqExtra/coins.js). The server owns prices, order state and the wallet credit; the client
 // only picks a pack and completes the gateway's checkout. ───
 router.get("/coins/packs", wrap(async (req, res) => {
-  ok(res, { packs: listPacks() });
+  // `upi`: paying by UPI straight to our account (no gateway) is offered too.
+  ok(res, { packs: listPacks(), upi: upiDirectEnabled, phoneRequired: paymentProvider === "cashfree" });
 }));
 
 router.post("/coins/orders", wrap(async (req, res) => {
   const user = await getCurrentUser(req);
   if (!user) return unauthorized(res, "sign in to buy coins");
   const packId = String(req.body?.packId || "");
+  if (req.body?.method === "upi") {
+    try { return created(res, await createUpiCoinOrder({ user, packId })); }
+    catch (err) {
+      if (err.code === "BAD_PACK") return badRequest(res, "unknown pack");
+      if (err.code === "PAYMENTS_UNAVAILABLE") return res.status(503).json({ error: "payments_unavailable", message: err.message });
+      throw err;
+    }
+  }
   const phone = String(req.body?.phone || "").replace(/\s+/g, "");
   // Razorpay asks for the phone in its own checkout; Cashfree (switch-back only) needs it here.
   if (paymentProvider === "cashfree" && !/^\+?\d{10,15}$/.test(phone)) return badRequest(res, "a phone number is required for the payment receipt");
@@ -303,6 +312,18 @@ router.post("/coins/orders", wrap(async (req, res) => {
     if (err.code === "PAYMENTS_UNAVAILABLE") return res.status(503).json({ error: "payments_unavailable", message: err.message });
     console.error("[coins] order creation failed:", err.message, err.cause?.razorpay ?? err.cause?.cashfree);
     badRequest(res, err.message);
+  }
+}));
+
+// The UTR (UPI reference) the buyer copied from their UPI app, for a person to check.
+router.post("/coins/orders/:id/utr", wrap(async (req, res) => {
+  const user = await getCurrentUser(req);
+  if (!user) return unauthorized(res, "sign in first");
+  try { ok(res, { order: await submitUpiUtr({ orderId: req.params.id, userId: user.id, utr: req.body?.utr }) }); }
+  catch (err) {
+    if (err.code === "NOT_FOUND") return res.status(404).json({ error: "not_found", message: err.message });
+    if (["BAD_UTR", "BAD_STATE", "TOO_MANY", "UTR_USED"].includes(err.code)) return badRequest(res, err.message);
+    throw err;
   }
 }));
 

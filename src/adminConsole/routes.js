@@ -27,6 +27,7 @@ import { nudgeStats } from "./nudges.js";
 import { tasksRouter } from "./tasks/routes.js";
 import { clearRosterCache, rememberOwnerName } from "./tasks/team.js";
 import { listVideos, uploadVideo, deleteVideo, rebalance } from "./videos.js";
+import { listUpiOrders, approveUpiOrder, rejectUpiOrder } from "../kynqExtra/coins.js";
 
 const router = express.Router();
 router.use(sameOriginWrites);
@@ -80,6 +81,20 @@ router.get("/overview", requireSection("overview"), guard(async (req, res) => ok
 router.get("/analytics", requireSection("analytics"), guard(async (req, res) => ok(res, await analytics(rangeFromQuery(req.query)))));
 router.get("/nudges", requireSection("nudges"), guard(async (req, res) => ok(res, await nudgeStats(rangeFromQuery(req.query)))));
 router.get("/finance", requireSection("finance"), guard(async (req, res) => ok(res, await finance(rangeFromQuery(req.query)))));
+// UPI paid straight to our account: a person checks each UTR against the bank statement.
+router.get("/finance/upi", requireSection("finance"), guard(async (req, res) => ok(res, { orders: await listUpiOrders({ status: String(req.query.status || "payment_review") }) })));
+router.post("/finance/upi/:id/approve", requireSection("finance"), guard(async (req, res) => {
+  const order = await approveUpiOrder(req.params.id, req.admin.email);
+  if (!order) return notFound(res, "order not found");
+  await logAudit(req.admin.email, "finance.upi.approve", req.params.id, { utr: order.utr, amount: order.amount });
+  ok(res, { order });
+}));
+router.post("/finance/upi/:id/reject", requireSection("finance"), guard(async (req, res) => {
+  const order = await rejectUpiOrder(req.params.id, req.admin.email, req.body?.reason);
+  if (!order) return notFound(res, "order not found");
+  await logAudit(req.admin.email, "finance.upi.reject", req.params.id, { reason: req.body?.reason ?? null });
+  ok(res, { order });
+}));
 
 router.get("/live", requireSection("overview"), guard(async (req, res) => ok(res, liveNow())));
 router.get("/traffic/realtime", requireSection("overview", "traffic"), guard(async (req, res) => ok(res, await realtime())));

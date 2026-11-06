@@ -170,3 +170,103 @@ export async function handleCoinWebhook(event) {
       break;
   }
 }
+
+// ─── UPI straight to kynq's own business account (no gateway) ───
+// The buyer pays our UPI id (QR, or a button that opens their UPI app with the amount and a
+// reference filled in), then types the 12-digit UTR their app shows. A person checks it against
+// the bank statement in the admin console and approves it; only then are the Koins credited
+// (markCoinOrderPaid, same exactly-once path as gateway payments). Statuses:
+//   pending_payment → payment_review (UTR sent) → paid (approved) | rejected
+// Off until both env vars are set: UPI_VPA (e.g. kynq@icici) and UPI_PAYEE_NAME (the name the
+// bank shows payers). Alerts for new UTRs go to UPI_ALERT_EMAIL (default hi@kynq.in).
+const UPI_VPA = process.env.UPI_VPA?.trim();
+const UPI_PAYEE_NAME = process.env.UPI_PAYEE_NAME?.trim();
+export const upiDirectEnabled = !!(UPI_VPA && UPI_PAYEE_NAME);
+const UPI_ALERT_EMAIL = process.env.UPI_ALERT_EMAIL || "hi@kynq.in";
+const MAX_UTR_TRIES = 3;
+
+/** The short reference the buyer's UPI app carries in the payment note: matches it to the order. */
+const upiRef = (id) => id.replace(/[^a-zA-Z0-9]/g, "").slice(-8).toUpperCase();
+
+async function upiPayload(order) {
+  const note = `KYNQ ${upiRef(order.id)}`;
+  const q = new URLSearchParams({ pa: UPI_VPA, pn: UPI_PAYEE_NAME, am: Number(order.amount).toFixed(2), cu: "INR", tn: note });
+  const url = `upi://pay?${q.toString().replace(/\+/g, "%20")}`;
+  const QR = (await import("qrcode")).default;
+  const qrSvg = await QR.toString(url, { type: "svg", margin: 1, errorCorrectionLevel: "M" });
+  return { vpa: UPI_VPA, payeeName: UPI_PAYEE_NAME, amount: order.amount, note, url, qrSvg };
+}
+
+let utrIndexReady = null;
+const ensureUtrIndex = () => {
+  // One UTR pays one order: the same reference can't be submitted twice (races included).
+  utrIndexReady ??= mongoose.connection.collection("coin_orders")
+    .createIndex({ utr: 1 }, { unique: true, partialFilterExpression: { utr: { $type: "string" } } })
+    .catch((err) => { utrIndexReady = null; throw err; });
+  return utrIndexReady;
+};
+
+export async function createUpiCoinOrder({ user, packId }) {
+  if (!upiDirectEnabled) throw Object.assign(new Error("UPI payments aren't available right now."), { code: "PAYMENTS_UNAVAILABLE" });
+  const pack = COIN_PACKS.find((p) => p.id === packId);
+  if (!pack) throw Object.assign(new Error("unknown pack"), { code: "BAD_PACK" });
+  const id = makeId("coin");
+  const now = Date.now();
+  const order = {
+    id, userId: user.id, packId: pack.id, coins: pack.coins, amount: pack.priceInr, currency: "INR",
+    method: "upi_direct", upiRef: upiRef(id), utr: null, utrTries: 0,
+    status: "pending_payment", createdAt: now, updatedAt: now, paidAt: null, lastFailure: null,
+    events: [{ type: "created", note: "upi direct", at: now }],
+  };
+  await orders.set(id, order);
+  return { order, mode: "upi", upi: await upiPayload(order) };
+}
+
+/** The buyer's UTR (12 digits) for their UPI order: queues it for review. */
+export async function submitUpiUtr({ orderId, userId, utr }) {
+  const clean = String(utr ?? "").replace(/\s+/g, "");
+  if (!/^\d{12}$/.test(clean)) throw Object.assign(new Error("Enter the 12-digit UTR / UPI reference number from your UPI app."), { code: "BAD_UTR" });
+  const order = await orders.get(orderId);
+  if (!order || order.userId !== userId || order.method !== "upi_direct") throw Object.assign(new Error("order not found"), { code: "NOT_FOUND" });
+  if (order.status === "paid") return order;
+  if (!["pending_payment", "payment_review", "rejected"].includes(order.status)) throw Object.assign(new Error("This order can't take a payment any more. Start a new one."), { code: "BAD_STATE" });
+  if ((order.utrTries ?? 0) >= MAX_UTR_TRIES) throw Object.assign(new Error(`Too many attempts. Write to ${UPI_ALERT_EMAIL} with your UTR and we'll sort it out.`), { code: "TOO_MANY" });
+  await ensureUtrIndex();
+  const taken = await mongoose.connection.collection("coin_orders").findOne({ utr: clean, id: { $ne: orderId } }, { projection: { _id: 1 } });
+  if (taken) throw Object.assign(new Error("That UTR has already been used for another order."), { code: "UTR_USED" });
+  const next = withEvent({ ...order, status: "payment_review", utr: clean, utrTries: (order.utrTries ?? 0) + 1, utrAt: Date.now(), lastFailure: null }, "utr_submitted", clean);
+  try { await orders.set(orderId, next); }
+  catch (err) { if (err?.code === 11000) throw Object.assign(new Error("That UTR has already been used for another order."), { code: "UTR_USED" }); throw err; }
+  const { sendEmail } = await import("../config/emailConfig.js");
+  sendEmail({
+    to: UPI_ALERT_EMAIL,
+    subject: `UPI payment to check: ₹${order.amount} · UTR ${clean}`,
+    text: `A buyer says they paid ₹${order.amount} by UPI for ${order.coins} Koins.\n\nUTR: ${clean}\nPayment note: KYNQ ${order.upiRef}\nOrder: ${orderId}\n\nCheck it on the bank statement, then approve or reject it in the admin console (Finance → UPI payments).`,
+  }).catch((err) => console.error("[upi] alert email failed:", err.message));
+  return next;
+}
+
+/** UPI orders waiting for a person to check (newest first), and recently decided ones. */
+export async function listUpiOrders({ status = "payment_review", limit = 100 } = {}) {
+  const rows = await mongoose.connection.collection("coin_orders")
+    .find({ method: "upi_direct", ...(status === "all" ? { status: { $in: ["payment_review", "paid", "rejected"] } } : { status }) })
+    .sort({ utrAt: -1, createdAt: -1 }).limit(Math.min(500, limit)).toArray();
+  return rows.map(({ _id, _key, ...rest }) => rest);
+}
+
+export async function approveUpiOrder(id, adminEmail) {
+  const order = await orders.get(id);
+  if (!order || order.method !== "upi_direct") return null;
+  if (order.status !== "payment_review") return order;
+  return markCoinOrderPaid(id, `UPI UTR ${order.utr} approved by ${adminEmail}`);
+}
+
+export async function rejectUpiOrder(id, adminEmail, reason) {
+  const order = await orders.get(id);
+  if (!order || order.method !== "upi_direct" || order.status !== "payment_review") return order ?? null;
+  const note = String(reason || "payment not found on the bank statement").slice(0, 200);
+  // The UTR is freed (null) so a mistyped one can be corrected; the buyer sees why.
+  const next = withEvent({ ...order, status: "rejected", utr: null, lastFailure: { note, at: Date.now() } }, "rejected", `${note} (by ${adminEmail}, UTR was ${order.utr})`);
+  await orders.set(id, next);
+  return next;
+}
