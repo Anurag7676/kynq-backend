@@ -1,7 +1,6 @@
 // The payment gateway behind every purchase (Koin packs and shop orders), in one place.
 //
-// Razorpay is the gateway. Cashfree is kept only as a switch-back: it runs when
-// PAYMENT_PROVIDER=cashfree is set (and its keys are present), never by default.
+// Razorpay or Cashfree, whichever is configured (Razorpay first); PAYMENT_PROVIDER forces one.
 // The endpoints the site calls don't change with the gateway: POST /api/checkout/session and
 // POST /api/kynq-extra/coins/orders answer with `mode` ("razorpay" | "cashfree" | "demo") and
 // what that gateway's checkout needs.
@@ -18,7 +17,11 @@ const carts = collection("carts");
 
 const wanted = String(process.env.PAYMENT_PROVIDER || "").toLowerCase();
 /** "razorpay" | "cashfree" | null (no gateway configured). */
-export const paymentProvider = wanted === "cashfree" && cashfreeConfigured ? "cashfree" : razorpayConfigured ? "razorpay" : null;
+// PAYMENT_PROVIDER picks one explicitly; otherwise Razorpay when its keys are set, else Cashfree.
+export const paymentProvider =
+  wanted === "cashfree" && cashfreeConfigured ? "cashfree"
+  : wanted === "razorpay" && razorpayConfigured ? "razorpay"
+  : razorpayConfigured ? "razorpay" : cashfreeConfigured ? "cashfree" : null;
 export const paymentsConfigured = !!paymentProvider;
 // Without a gateway, orders are marked paid with no payment ("demo mode"): fine on a laptop, a
 // free-money hole anywhere real. So demo mode exists ONLY outside production.

@@ -1,6 +1,5 @@
 // Cashfree Payment Gateway client — Orders API + webhook signature verification.
-// DISABLED by default: Razorpay is the gateway (see payments.js). Cashfree only runs when
-// PAYMENT_PROVIDER=cashfree is set; old Cashfree orders still settle through its webhook.
+// Used when Razorpay isn't configured, or PAYMENT_PROVIDER=cashfree (see payments.js).
 // Docs: https://www.cashfree.com/docs/payments/online/web/redirect
 //       https://www.cashfree.com/docs/api-reference/vrs/webhook-signature-verification
 //
