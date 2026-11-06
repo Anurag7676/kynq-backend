@@ -13,7 +13,7 @@
 // anything the client sends.
 import mongoose from "mongoose";
 import { collection, makeId } from "../gift/store.js";
-import { paymentsConfigured, demoPaymentsAllowed, PAYMENTS_UNAVAILABLE, startPayment, gatewayStatus } from "../gift/payments.js";
+import { koinGatewayConfigured, demoPaymentsAllowed, PAYMENTS_UNAVAILABLE, startKoinPayment, gatewayStatus } from "../gift/payments.js";
 import { credit, debit } from "./wallet.js";
 import { recordCreatorCommission, reverseCreatorCommission } from "./creators.js";
 import { assignKoinInvoiceNumber } from "../accounting/core.js";
@@ -53,16 +53,17 @@ export async function listCoinOrdersForUser(userId, limit = 20) {
 }
 
 /**
- * Create an order for `packId` and, when Cashfree is configured, the
- * matching Cashfree order. Returns what the client needs to pay (or, in
- * demo mode without keys, the already-paid order).
+ * Create an order for `packId` and start its payment (through kynq.online, see
+ * gift/payments.js startKoinPayment). Returns what the client needs to pay (or, in
+ * demo mode without keys, the already-paid order). `returnOrigin` is the site the
+ * buyer is sent back to after paying; it defaults to CLIENT_URL.
  */
-export async function createCoinOrder({ user, packId, phone }) {
+export async function createCoinOrder({ user, packId, phone, returnOrigin }) {
   const pack = COIN_PACKS.find((p) => p.id === packId);
   if (!pack) throw Object.assign(new Error("unknown pack"), { code: "BAD_PACK" });
 
   // Fail closed BEFORE creating anything: no keys in production = no sale.
-  if (!paymentsConfigured && !demoPaymentsAllowed) throw Object.assign(new Error(PAYMENTS_UNAVAILABLE), { code: "PAYMENTS_UNAVAILABLE" });
+  if (!koinGatewayConfigured && !demoPaymentsAllowed) throw Object.assign(new Error(PAYMENTS_UNAVAILABLE), { code: "PAYMENTS_UNAVAILABLE" });
 
   const id = makeId("coin");
   const now = Date.now();
@@ -74,20 +75,20 @@ export async function createCoinOrder({ user, packId, phone }) {
   };
   await orders.set(id, order);
 
-  if (!paymentsConfigured) {
+  if (!koinGatewayConfigured) {
     // Demo mode (never in production — see demoPaymentsAllowed).
     order = await markCoinOrderPaid(id, "demo mode: no payment gateway configured");
     return { order, mode: "demo" };
   }
 
   try {
-    const { refs, client } = await startPayment({
+    const { refs, client } = await startKoinPayment({
       orderId: id,
       amount: pack.priceInr,
       currency: "INR",
       customer: { id: user.id, name: user.name || "kynq member", email: user.email, phone },
-      description: `${pack.coins} Koins`,
-      returnUrl: `${CLIENT_URL}/store/coins?coin_order=${id}`,
+      description: `${pack.coins.toLocaleString("en-IN")} Koins`,
+      returnUrl: `${returnOrigin || CLIENT_URL}/store/coins?coin_order=${id}`,
     });
     order = withEvent({ ...order, ...refs }, `${refs.paymentProvider}_order_created`);
     await orders.set(id, order);
@@ -109,7 +110,14 @@ export async function markCoinOrderPaid(id, note) {
   // and just completes the status change.
   await credit(order.userId, "coin_purchase", { refId: id, amount: order.coins, note: `bought ${order.coins} coins` });
   const next = withEvent({ ...order, status: "paid", paidAt: Date.now(), lastFailure: null }, "paid", note);
-  await orders.set(id, next);
+  // Compare-and-set on the status we read: when the webhook, the return and a status poll settle
+  // the same order at once, only one of them flips it, so only one goes on to the commission and
+  // the invoice number (a loser used to take a number too, leaving gaps in the KQ series).
+  const flipped = await mongoose.connection.collection("coin_orders").updateOne(
+    { _key: id, status: order.status },
+    { $set: { ...next, _key: id } },
+  );
+  if (!flipped.modifiedCount) return orders.get(id);
   await recordCreatorCommission(next); // creator referral program; once per order, never throws
   await assignKoinInvoiceNumber(id);   // KQ/<FY>/<n>; never throws
   return next;
@@ -139,12 +147,17 @@ export async function reconcileCoinOrder(order) {
   if (order.status !== "pending_payment") return order;
   const status = await gatewayStatus(order);
   if (status === "paid") return markCoinOrderPaid(order.id, `reconciled via GET (${order.paymentProvider ?? "gateway"} order paid)`);
-  if (status === "expired") {
-    const next = withEvent({ ...order, status: "cancelled" }, "expired", "gateway order expired");
-    await orders.set(order.id, next);
-    return next;
-  }
+  if (status === "expired") return expireCoinOrder(order.id, "gateway order expired");
   return order;
+}
+
+/** A gateway order that can no longer be paid: the coin order is cancelled (no-op unless pending). */
+export async function expireCoinOrder(id, note) {
+  const order = await orders.get(id);
+  if (!order || order.status !== "pending_payment") return order;
+  const next = withEvent({ ...order, status: "cancelled" }, "expired", note);
+  await orders.set(id, next);
+  return next;
 }
 
 /** Called by the shared Cashfree webhook for order ids in the coin namespace. */

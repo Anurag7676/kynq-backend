@@ -44,6 +44,7 @@ import giftCheckout from "./gift/routes/checkout.js";
 import giftWebhook from "./gift/routes/webhook.js";
 import giftWebhookCashfree from "./gift/routes/webhook-cashfree.js";
 import giftWebhookRazorpay from "./gift/routes/webhook-razorpay.js";
+import webhookKynqOnline from "./gift/routes/webhook-kynq-online.js";
 import razorpayVerify from "./gift/routes/razorpay-verify.js";
 // kynq gift cart/wishlist/auth — session-cookie-scoped, match the frontend's
 // cart-context/auth-context contract exactly (POST /items, PATCH /items/:id,
@@ -77,7 +78,7 @@ app.set("trust proxy", 1);
 
 // Regular body parsing middleware for most routes
 // Skip body parsing for webhook routes to preserve raw body for signature verification
-const RAW_BODY_ROUTES = ["/api/payments/webhook", "/api/webhooks/stripe", "/api/webhooks/cashfree", "/api/webhooks/razorpay"];
+const RAW_BODY_ROUTES = ["/api/payments/webhook", "/api/webhooks/stripe", "/api/webhooks/cashfree", "/api/webhooks/razorpay", "/api/webhooks/kynq-online"];
 app.use((req, res, next) => {
   if (RAW_BODY_ROUTES.includes(req.originalUrl)) {
     next();
@@ -146,6 +147,8 @@ app.use("/media", express.static(path.join(__dirname, "../public/media")));
 app.use("/api/webhooks/stripe", express.raw({ type: "application/json" }), giftWebhook);
 app.use("/api/webhooks/cashfree", express.raw({ type: "application/json" }), giftWebhookCashfree);
 app.use("/api/webhooks/razorpay", express.raw({ type: "application/json" }), giftWebhookRazorpay);
+// Koin payments taken by kynq.online report back here (signed; see gift/kynq-online.js).
+app.use("/api/webhooks/kynq-online", express.raw({ type: "application/json" }), webhookKynqOnline);
 app.use("/api/razorpay", razorpayVerify);
 
 // API Routes

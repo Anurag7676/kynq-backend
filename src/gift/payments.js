@@ -12,6 +12,7 @@ import { getOrder, markOrderPaid, setOrderStatus } from "./orders-store.js";
 import { sendOrderConfirmationEmail } from "./order-email.js";
 import { cashfreeConfigured, cashfreeMode, createCashfreeOrder, getCashfreeOrder } from "./cashfree.js";
 import { razorpayConfigured, razorpayKeyId, razorpayMode, createRazorpayOrder, getRazorpayOrder } from "./razorpay.js";
+import { kynqOnlineConfigured, createKynqOnlinePayment, getKynqOnlinePayment } from "./kynq-online.js";
 
 const carts = collection("carts");
 
@@ -65,8 +66,40 @@ export async function startPayment({ orderId, amount, currency = "INR", customer
   throw new Error(PAYMENTS_UNAVAILABLE);
 }
 
+// ─── Koin packs ───
+// Card / gateway payments for Koins are taken by kynq.online (its Cashfree), never by kynq.in's own
+// Cashfree. Without kynq.online, Razorpay (if configured) is the fallback; otherwise no gateway.
+export const koinGatewayConfigured = kynqOnlineConfigured || paymentProvider === "razorpay";
+/** Cashfree (behind kynq.online) needs the buyer's phone for its receipt. */
+export const koinPhoneRequired = kynqOnlineConfigured;
+
+export async function startKoinPayment({ orderId, amount, customer, description, returnUrl }) {
+  if (kynqOnlineConfigured) {
+    const p = await createKynqOnlinePayment({
+      orderId,
+      amount,
+      description,
+      customer: { id: String(customer.id), name: customer.name || "", email: customer.email || "", phone: customer.phone },
+      returnUrl,
+    });
+    return {
+      refs: { paymentProvider: "kynq-online", kynqOnlinePaymentId: p.id },
+      client: { mode: "redirect", url: p.checkoutUrl },
+    };
+  }
+  if (paymentProvider === "razorpay") return startPayment({ orderId, amount, customer, description, returnUrl });
+  throw new Error(PAYMENTS_UNAVAILABLE);
+}
+
 /** Ask the gateway directly about a still-pending order: "paid" | "expired" | null (don't know yet). */
 export async function gatewayStatus(order) {
+  if (order?.paymentProvider === "kynq-online" && order.kynqOnlinePaymentId && kynqOnlineConfigured) {
+    // kynq.online checks Cashfree itself before answering; we still match the payment and amount.
+    const p = await getKynqOnlinePayment(order.id).catch(() => null);
+    if (!p || p.id !== order.kynqOnlinePaymentId) return null;
+    if (p.status === "paid") return Number(p.amount) === Number(order.amount) && p.currency === "INR" ? "paid" : null;
+    return p.status === "expired" ? "expired" : null;
+  }
   if (order?.razorpayOrderId && razorpayConfigured) {
     const rz = await getRazorpayOrder(order.razorpayOrderId).catch(() => null);
     return rz?.status === "paid" ? "paid" : null;

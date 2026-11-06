@@ -31,7 +31,7 @@ import {
 } from "../../kynqExtra/challenges.js";
 import { auth } from "../../middleware/authMiddleware.js";
 import { activitySummary } from "../../kynqExtra/activity.js";
-import { paymentProvider } from "../payments.js";
+import { koinPhoneRequired } from "../payments.js";
 
 const router = express.Router();
 
@@ -286,8 +286,21 @@ router.post("/challenges/:id/moment", wrap(async (req, res) => {
 // only picks a pack and completes the gateway's checkout. ───
 router.get("/coins/packs", wrap(async (req, res) => {
   // `upi`: paying by UPI straight to our account (no gateway) is offered too.
-  ok(res, { packs: listPacks(), upi: upiDirectEnabled, card: koinCardPaymentsEnabled, phoneRequired: koinCardPaymentsEnabled && paymentProvider === "cashfree" });
+  ok(res, { packs: listPacks(), upi: upiDirectEnabled, card: koinCardPaymentsEnabled, phoneRequired: koinCardPaymentsEnabled && koinPhoneRequired });
 }));
+
+// Card payments for Koins happen on kynq.online; afterwards the buyer is sent back to the site
+// they started on when it's one of ours. The Android app (app.kynq.in) opens the payment in the
+// phone's browser, which can't reach the app's built-in site, so app buyers come back to CLIENT_URL.
+const KOIN_RETURN_ORIGINS = new Set(
+  [process.env.CLIENT_URL, "https://kynq.in", "https://www.kynq.in"]
+    .map((u) => { try { return new URL(u).origin; } catch { return null; } })
+    .filter(Boolean),
+);
+const koinReturnOrigin = (req) => {
+  const origin = req.get("origin");
+  return origin && KOIN_RETURN_ORIGINS.has(origin) ? origin : undefined;
+};
 
 router.post("/coins/orders", wrap(async (req, res) => {
   const user = await getCurrentUser(req);
@@ -303,15 +316,15 @@ router.post("/coins/orders", wrap(async (req, res) => {
   }
   if (!koinCardPaymentsEnabled) return res.status(503).json({ error: "payments_unavailable", message: "Pay by UPI instead." });
   const phone = String(req.body?.phone || "").replace(/\s+/g, "");
-  // Razorpay asks for the phone in its own checkout; Cashfree (switch-back only) needs it here.
-  if (paymentProvider === "cashfree" && !/^\+?\d{10,15}$/.test(phone)) return badRequest(res, "a phone number is required for the payment receipt");
+  // Razorpay asks for the phone in its own checkout; Cashfree (behind kynq.online) needs it here.
+  if (koinPhoneRequired && !/^\+?\d{10,15}$/.test(phone)) return badRequest(res, "a phone number is required for the payment receipt");
   try {
-    const result = await createCoinOrder({ user, packId, phone });
+    const result = await createCoinOrder({ user, packId, phone, returnOrigin: koinReturnOrigin(req) });
     created(res, result);
   } catch (err) {
     if (err.code === "BAD_PACK") return badRequest(res, "unknown pack");
     if (err.code === "PAYMENTS_UNAVAILABLE") return res.status(503).json({ error: "payments_unavailable", message: err.message });
-    console.error("[coins] order creation failed:", err.message, err.cause?.razorpay ?? err.cause?.cashfree);
+    console.error("[coins] order creation failed:", err.message, err.cause?.razorpay ?? err.cause?.kynqOnline ?? "");
     badRequest(res, err.message);
   }
 }));
