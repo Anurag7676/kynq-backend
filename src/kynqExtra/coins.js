@@ -177,11 +177,15 @@ export async function handleCoinWebhook(event) {
 // the bank statement in the admin console and approves it; only then are the Koins credited
 // (markCoinOrderPaid, same exactly-once path as gateway payments). Statuses:
 //   pending_payment → payment_review (UTR sent) → paid (approved) | rejected
-// Off until both env vars are set: UPI_VPA (e.g. kynq@icici) and UPI_PAYEE_NAME (the name the
-// bank shows payers). Alerts for new UTRs go to UPI_ALERT_EMAIL (default hi@kynq.in).
-const UPI_VPA = process.env.UPI_VPA?.trim();
-const UPI_PAYEE_NAME = process.env.UPI_PAYEE_NAME?.trim();
-export const upiDirectEnabled = !!(UPI_VPA && UPI_PAYEE_NAME);
+// UPI_VPA / UPI_PAYEE_NAME override the account below (set either to "off" to turn UPI off).
+// Alerts for new UTRs go to UPI_ALERT_EMAIL (default hi@kynq.in).
+const UPI_VPA = (process.env.UPI_VPA ?? "bk7676581@ybl").trim();
+const UPI_PAYEE_NAME = (process.env.UPI_PAYEE_NAME ?? "kynq").trim();
+export const upiDirectEnabled = !!(UPI_VPA && UPI_PAYEE_NAME) && UPI_VPA !== "off" && UPI_PAYEE_NAME !== "off";
+
+// Koins by card / gateway (Cashfree, Razorpay) are hidden: UPI only. KOIN_CARD_PAYMENTS=on
+// brings the gateway back for Koins (the shop checkout is separate and unaffected).
+export const koinCardPaymentsEnabled = process.env.KOIN_CARD_PAYMENTS === "on";
 const UPI_ALERT_EMAIL = process.env.UPI_ALERT_EMAIL || "hi@kynq.in";
 const MAX_UTR_TRIES = 3;
 

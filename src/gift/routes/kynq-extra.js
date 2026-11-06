@@ -20,7 +20,7 @@ import { emitToUser } from "../../kynqExtra/signaling.js";
 import { listCallsForUser } from "../../kynqExtra/calls-store.js";
 import { getBalance, getHistory, EARN_RULES } from "../../kynqExtra/wallet.js";
 import { getAmbassador, todayProgress, history, goodiesProgress } from "../../kynqExtra/ambassador.js";
-import { listPacks, createCoinOrder, getCoinOrder, listCoinOrdersForUser, reconcileCoinOrder, upiDirectEnabled, createUpiCoinOrder, submitUpiUtr } from "../../kynqExtra/coins.js";
+import { listPacks, createCoinOrder, getCoinOrder, listCoinOrdersForUser, reconcileCoinOrder, upiDirectEnabled, koinCardPaymentsEnabled, createUpiCoinOrder, submitUpiUtr } from "../../kynqExtra/coins.js";
 import { getCurrentUser } from "../session.js";
 import { getKoinInvoiceData } from "../../accounting/core.js";
 import { koinInvoicePdf } from "../../accounting/pdf.js";
@@ -286,7 +286,7 @@ router.post("/challenges/:id/moment", wrap(async (req, res) => {
 // only picks a pack and completes the gateway's checkout. ───
 router.get("/coins/packs", wrap(async (req, res) => {
   // `upi`: paying by UPI straight to our account (no gateway) is offered too.
-  ok(res, { packs: listPacks(), upi: upiDirectEnabled, phoneRequired: paymentProvider === "cashfree" });
+  ok(res, { packs: listPacks(), upi: upiDirectEnabled, card: koinCardPaymentsEnabled, phoneRequired: koinCardPaymentsEnabled && paymentProvider === "cashfree" });
 }));
 
 router.post("/coins/orders", wrap(async (req, res) => {
@@ -301,6 +301,7 @@ router.post("/coins/orders", wrap(async (req, res) => {
       throw err;
     }
   }
+  if (!koinCardPaymentsEnabled) return res.status(503).json({ error: "payments_unavailable", message: "Pay by UPI instead." });
   const phone = String(req.body?.phone || "").replace(/\s+/g, "");
   // Razorpay asks for the phone in its own checkout; Cashfree (switch-back only) needs it here.
   if (paymentProvider === "cashfree" && !/^\+?\d{10,15}$/.test(phone)) return badRequest(res, "a phone number is required for the payment receipt");
