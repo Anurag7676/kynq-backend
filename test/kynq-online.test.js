@@ -108,6 +108,16 @@ test("a Koin order starts a signed payment on kynq.online and redirects there", 
   assert.equal(online.calls.at(-1).body.returnUrl, `https://www.kynq.in/store/coins?coin_order=${fromWww.res.order.id}`);
 });
 
+test("no phone is asked for on kynq.in: kynq.online's checkout asks for it once", db, async () => {
+  const { koinPhoneRequired } = await import("../src/gift/payments.js");
+  assert.equal(koinPhoneRequired, false);
+  const none = await coins.createCoinOrder({ user, packId: "pack_500" });
+  assert.equal(none.mode, "redirect");
+  assert.equal(online.calls.at(-1).body.customer.phone, "");
+  await coins.createCoinOrder({ user, packId: "pack_500", phone: "12ab" });
+  assert.equal(online.calls.at(-1).body.customer.phone, "", "an invalid number isn't passed on");
+});
+
 test("a signed paid result credits the Koins exactly once", db, async () => {
   const { res, payment } = await start("pack_1000");
   const before = await balance();

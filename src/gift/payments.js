@@ -70,8 +70,12 @@ export async function startPayment({ orderId, amount, currency = "INR", customer
 // Card / gateway payments for Koins are taken by kynq.online (its Cashfree), never by kynq.in's own
 // Cashfree. Without kynq.online, Razorpay (if configured) is the fallback; otherwise no gateway.
 export const koinGatewayConfigured = kynqOnlineConfigured || paymentProvider === "razorpay";
-/** Cashfree (behind kynq.online) needs the buyer's phone for its receipt. */
-export const koinPhoneRequired = kynqOnlineConfigured;
+/**
+ * Ask the buyer for a phone number on kynq.in? Not by default: kynq.online's Razorpay checkout asks
+ * for it once (and remembers it). KOIN_PHONE_REQUIRED=on brings the field back (e.g. Cashfree only).
+ */
+export const koinPhoneRequired = kynqOnlineConfigured && process.env.KOIN_PHONE_REQUIRED === "on";
+const validPhone = (p) => (/^\+?\d{10,15}$/.test(String(p || "")) ? String(p) : "");
 
 export async function startKoinPayment({ orderId, amount, customer, description, returnUrl }) {
   if (kynqOnlineConfigured) {
@@ -79,7 +83,7 @@ export async function startKoinPayment({ orderId, amount, customer, description,
       orderId,
       amount,
       description,
-      customer: { id: String(customer.id), name: customer.name || "", email: customer.email || "", phone: customer.phone },
+      customer: { id: String(customer.id), name: customer.name || "", email: customer.email || "", phone: validPhone(customer.phone) },
       returnUrl,
     });
     return {
