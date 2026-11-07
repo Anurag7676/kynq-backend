@@ -4,6 +4,7 @@
 // confirming they are 18 or older at onboarding (`adult: true`, the current screen) or, from
 // older app builds, with a date of birth that works out to 18+. Both are self-declared.
 import { collection } from "../gift/store.js";
+import mongoose from "mongoose";
 import { findUserById } from "../gift/session.js";
 
 const users = collection("users");
@@ -177,7 +178,22 @@ export async function publicCard(userId) {
   const [pub, profile] = await Promise.all([getPublicName(userId).catch(() => null), getExtraProfile(userId).catch(() => null)]);
   const first = String(pub?.name ?? "").trim().split(/\s+/)[0]?.slice(0, 20) || "";
   const name = first && first.toLowerCase() !== "someone" ? first.charAt(0).toUpperCase() + first.slice(1) : null;
-  return { name, city: profile?.city ?? null, state: profile?.state ?? null };
+  return { name, city: profile?.city ?? null, state: profile?.state ?? null, caution: await needsCaution(userId).catch(() => false) };
+}
+
+// Extra care when this person is matched with a woman (her device keeps their video blurred until
+// it has scanned clean with a face in view): accounts under 3 days old, or anyone with a nudity
+// strike in the last 90 days or confirmed nudity evidence in the last 30. Never shown to anyone.
+async function needsCaution(userId) {
+  const now = Date.now();
+  const user = await findUserById(userId);
+  if (!user || now - (Number(user.createdAt) || 0) < 3 * 86_400_000) return true;
+  const col = (n) => mongoose.connection.collection(n);
+  const [strike, evidence] = await Promise.all([
+    col("moderation_strikes").findOne({ userId, at: { $gte: now - 90 * 86_400_000 } }, { projection: { _id: 1 } }),
+    col("moderation_events").findOne({ subject: userId, confirmed: true, at: { $gte: now - 30 * 86_400_000 } }, { projection: { _id: 1 } }),
+  ]);
+  return !!(strike || evidence);
 }
 
 export async function getPublicName(userId) {

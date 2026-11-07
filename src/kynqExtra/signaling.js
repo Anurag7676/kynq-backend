@@ -32,6 +32,7 @@ import { startPairQuestions, stopPairQuestions, pickPairAnswer, skipPairQuestion
 import { recordNudgeEvent, ensureNudgeEventIndexes } from "./nudge-events.js";
 import { handleScore as handleModerationScore, ensureModerationIndexes, warmModeration } from "./moderation.js";
 import { attachSquad, startSquad, busyInSquad, isInSquad, removeFromSquad, inSquadCall, endSquadForModeration } from "./squad.js";
+import { recordShieldSummary } from "./safety-stats.js";
 
 // scopedId -> Set<socketId>, so REST routes (friend requests, DMs) can push
 // realtime events to a user wherever they are in the app.
@@ -650,6 +651,14 @@ export function initSignaling(server) {
     });
 
     // Nudity protection: a score from this device (its own camera, or the video it receives).
+    // One summary per 1:1 call this device watched: blurred / no face / blocked / reported (safety-stats.js).
+    socket.on("mod:summary", async (p = {}) => {
+      try {
+        socket.data.gender ??= (await getExtraProfile(socket.data.userId).catch(() => null))?.gender ?? null;
+        await recordShieldSummary({ viewer: scopedId, gender: socket.data.gender, callId: p.callId, blurred: p.blurred === true, noFace: p.noFace === true, blocked: p.blocked === true, reported: p.reported === true });
+      } catch (err) { console.error("[safety] summary failed:", err.message); }
+    });
+
     socket.on("mod:score", async (payload, ack) => {
       try {
         const group = typeof payload?.callId === "string" && payload.callId.startsWith("sqc_");

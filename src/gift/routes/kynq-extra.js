@@ -32,6 +32,7 @@ import {
 import { auth } from "../../middleware/authMiddleware.js";
 import { activitySummary } from "../../kynqExtra/activity.js";
 import { koinPhoneRequired } from "../payments.js";
+import { submitAppeal } from "../../kynqExtra/appeals.js";
 
 const router = express.Router();
 
@@ -327,6 +328,12 @@ router.post("/coins/orders", wrap(async (req, res) => {
     console.error("[coins] order creation failed:", err.message, err.cause?.razorpay ?? err.cause?.kynqOnline ?? "");
     badRequest(res, err.message);
   }
+}));
+
+// "I was wrongly blocked": the lockout message hands out a token, since they can't sign in.
+router.post("/moderation/appeal", wrap(async (req, res) => {
+  try { ok(res, await submitAppeal({ token: req.body?.token, message: req.body?.message })); }
+  catch (err) { if (err.code === "bad_request") return badRequest(res, err.message); throw err; }
 }));
 
 // The UTR (UPI reference) the buyer copied from their UPI app, for a person to check.

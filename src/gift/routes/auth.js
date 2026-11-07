@@ -12,6 +12,7 @@ import { ok, badRequest, unauthorized, forbidden, tooMany, wrap } from "../http.
 import { attributeCampusSignup, CAMPUS_COOKIE } from "../../kynqExtra/campusLinks.js";
 import { attributeCreatorSignup, CREATOR_COOKIE } from "../../kynqExtra/creators.js";
 import { activatePendingAmbassador } from "../../kynqExtra/ambassadorAutoApprove.js";
+import { appealTokenFor } from "../../kynqExtra/appeals.js";
 
 const router = express.Router();
 const users = collection("users");
@@ -104,9 +105,9 @@ router.post("/google", wrap(async (req, res) => {
     const until = Number(user.kynqExtraRestrictedUntil) || 0;
     if (!user.kynqExtraRestricted && until > Date.now()) {
       const when = new Date(until).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
-      return forbidden(res, `Your account is paused until ${when} for breaking our rules on nudity. If you think this is a mistake, email hi@kynq.in.`);
+      return res.status(403).json({ error: "forbidden", message: `Your account is paused until ${when} for breaking our rules on nudity.`, appealToken: await appealTokenFor(user.id).catch(() => null) });
     }
-    return forbidden(res, "This account has been restricted, so you can't sign in. If you think this is a mistake, email hi@kynq.in.");
+    return res.status(403).json({ error: "forbidden", message: "This account has been restricted, so you can't sign in.", appealToken: await appealTokenFor(user.id).catch(() => null) });
   }
   if (isNew && req.cookies?.[CAMPUS_COOKIE]) {
     await attributeCampusSignup(user.id, req.cookies[CAMPUS_COOKIE]).catch((err) => console.error("[campus] attribution failed for", user.id, ":", err.message));

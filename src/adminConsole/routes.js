@@ -28,6 +28,8 @@ import { tasksRouter } from "./tasks/routes.js";
 import { clearRosterCache, rememberOwnerName } from "./tasks/team.js";
 import { listVideos, uploadVideo, deleteVideo, rebalance } from "./videos.js";
 import { listUpiOrders, approveUpiOrder, rejectUpiOrder } from "../kynqExtra/coins.js";
+import { listAppeals, resolveAppeal } from "../kynqExtra/appeals.js";
+import { safetyStats } from "../kynqExtra/safety-stats.js";
 
 const router = express.Router();
 router.use(sameOriginWrites);
@@ -104,6 +106,9 @@ router.get("/traffic", requireSection("traffic"), guard(async (req, res) => ok(r
 router.get("/reports", requireSection("moderation"), guard(async (req, res) => ok(res, await listReports(req.query))));
 router.post("/reports/:id/review", requireSection("moderation"), guard(async (req, res) => ok(res, { report: await reviewReport(req.params.id, req.body || {}, req.admin) })));
 // People the nudity model acted on, the evidence, and undo.
+router.get("/moderation/appeals", requireSection("moderation"), guard(async (req, res) => ok(res, { appeals: await listAppeals({ status: String(req.query.status || "open") }) })));
+router.post("/moderation/appeals/:id/resolve", requireSection("moderation"), guard(async (req, res) => ok(res, await resolveAppeal(req.params.id, req.body?.decision, req.admin, req.body?.note))));
+router.get("/moderation/safety", requireSection("moderation"), guard(async (req, res) => ok(res, await safetyStats(req.query.days))));
 router.get("/model-blocks", requireSection("moderation"), guard(async (req, res) => ok(res, await listModelBlocks(req.query))));
 router.get("/model-blocks/frame/:eventId", requireSection("moderation"), guard(async (req, res) => ok(res, await modelBlockFrame(req.params.eventId, req.admin))));
 router.get("/model-blocks/:id", requireSection("moderation"), guard(async (req, res) => ok(res, { person: await modelBlockDetail(req.params.id) })));
