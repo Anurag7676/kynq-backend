@@ -1,7 +1,8 @@
 // Kynq Extra profile fields — layered onto the EXISTING kynq `users`
 // collection (Backend/src/gift/session.js), not a parallel user system.
-// Matchmaking requires a real, verified date of birth before a user is
-// ever allowed into the queue — this is a hard gate, not a checkbox.
+// Nobody enters the matching queue until they have passed the age gate once: either by
+// confirming they are 18 or older at onboarding (`adult: true`, the current screen) or, from
+// older app builds, with a date of birth that works out to 18+. Both are self-declared.
 import { collection } from "../gift/store.js";
 import { findUserById } from "../gift/session.js";
 
@@ -104,11 +105,16 @@ export async function getExtraProfile(userId, preloadedUser) {
 // Set once at Kynq Extra onboarding. dob is immutable after the first
 // successful set — resubmitting a different DOB to game the age gate is
 // rejected, not silently overwritten.
-export async function setExtraProfile(userId, { dob, interests, locationScope, city, state, bio, gender, phone }) {
+export async function setExtraProfile(userId, { adult, dob, interests, locationScope, city, state, bio, gender, phone }) {
   const user = await findUserById(userId);
   if (!user) throw new Error("user not found");
 
   const patch = {};
+  if (adult !== undefined && adult !== true) throw new Error(`you must be ${MIN_AGE} or older to use kynq`);
+  if (adult === true && !user.ageVerified) {
+    patch.ageVerified = true;
+    patch.ageConfirmedAt = new Date().toISOString();
+  }
   if (dob && !user.dob) {
     const result = validateDob(dob);
     if (!result.ok) throw new Error(result.reason);
@@ -156,7 +162,7 @@ export async function setExtraProfile(userId, { dob, interests, locationScope, c
 
 export async function isAgeGateCleared(userId) {
   const user = await findUserById(userId);
-  return !!(user?.ageVerified && user?.dob);
+  return !!(user?.ageVerified && (user?.dob || user?.ageConfirmedAt));
 }
 
 // Minimal, safe-to-expose info about ANOTHER user — just enough for the
