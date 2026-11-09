@@ -102,11 +102,13 @@ app.use(cookieParser());
 // the app, never on the network). It's same-site with api-prod.kynq.in, so the usual auth
 // cookies work; it's always allowed, whatever CORS_ORIGINS says.
 export const APP_ORIGINS = ["https://app.kynq.in"];
+// The global site (kynq.live; its API is api.kynq.live, same site, so cookies work): always allowed.
+export const GLOBAL_ORIGINS = ["https://kynq.live", "https://www.kynq.live"];
 const ALLOWED_ORIGINS = [...(process.env.CORS_ORIGINS
   ? process.env.CORS_ORIGINS.split(",").map((s) => s.trim()).filter(Boolean)
   : ["https://kynq.in", "https://www.kynq.in", "http://localhost:3007", "http://localhost:3000",
      // Local test builds of the Android app (bundled, served as http://localhost; USB testing only).
-     ...(process.env.NODE_ENV === "production" ? [] : ["http://localhost"])]), ...APP_ORIGINS];
+     ...(process.env.NODE_ENV === "production" ? [] : ["http://localhost"])]), ...APP_ORIGINS, ...GLOBAL_ORIGINS];
 app.use(cors({ origin: [...ALLOWED_ORIGINS, ...CONSOLE_ORIGINS], credentials: true }));
 app.use(helmet());
 

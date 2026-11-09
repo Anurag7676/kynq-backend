@@ -33,6 +33,7 @@ import { recordNudgeEvent, ensureNudgeEventIndexes } from "./nudge-events.js";
 import { handleScore as handleModerationScore, ensureModerationIndexes, warmModeration } from "./moderation.js";
 import { attachSquad, startSquad, busyInSquad, isInSquad, removeFromSquad, inSquadCall, endSquadForModeration } from "./squad.js";
 import { recordShieldSummary } from "./safety-stats.js";
+import { regionOf } from "./matchmaker.js";
 
 // scopedId -> Set<socketId>, so REST routes (friend requests, DMs) can push
 // realtime events to a user wherever they are in the app.
@@ -350,6 +351,7 @@ export function initSignaling(server) {
           genderPref: wanted,
           squadOk: payload.squadOk === true,
           card,
+          region: regionOf(payload.country),
         });
         console.log(`[kynqExtra] queue:join  scopedId=${scopedId} city=${socket.data.city ?? "-"} scope=${payload.locationScope ?? "worldwide"} topics=${(payload.topics ?? []).join(",") || "-"} queueDepth=${matchmaker.queueDepth()}`);
         ack?.({ ok: true });

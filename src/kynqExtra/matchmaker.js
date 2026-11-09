@@ -46,7 +46,28 @@ const RECENT_RELAX_MS = 45_000;
 const queue = new Map();
 let tickHandle = null;
 
-export function joinQueue({ scopedId, socketId, topics, locationScope, location, gender, genderPref, squadOk, card }) {
+// ─── Region: same region first, then worldwide ───
+// kynq.in users are India; kynq.live users are the country they came in through (or their
+// timezone). Countries are grouped into regions, and two people in different regions are only
+// matched once both have waited REGION_RELAX_MS, so nobody waits long for lack of local people.
+const REGION_RELAX_MS = Number(process.env.KYNQ_REGION_RELAX_MS) || 12_000;
+const REGION_OF = {
+  "south-asia": ["IN", "PK", "BD", "NP", "LK", "BT", "MV", "AF"],
+  "north-america": ["US", "CA"],
+  "latin-america": ["BR", "MX", "AR", "CO", "CL", "PE", "VE", "EC", "BO", "PY", "UY", "GT", "DO", "CR", "PA"],
+  europe: ["GB", "IE", "FR", "DE", "ES", "PT", "IT", "NL", "BE", "SE", "NO", "DK", "FI", "PL", "AT", "CH", "GR", "RO", "CZ", "HU"],
+  "middle-east-africa": ["AE", "SA", "QA", "KW", "BH", "OM", "EG", "NG", "KE", "ZA", "TR", "IL", "JO", "MA"],
+  "east-asia-pacific": ["ID", "PH", "MY", "SG", "TH", "VN", "JP", "KR", "AU", "NZ", "HK", "TW"],
+};
+const COUNTRY_REGION = Object.fromEntries(Object.entries(REGION_OF).flatMap(([r, cs]) => cs.map((c) => [c, r])));
+/** ISO country code from the client (validated) → region name, or null if unknown. */
+export const regionOf = (country) => (typeof country === "string" && /^[A-Z]{2}$/.test(country) ? COUNTRY_REGION[country] ?? "other" : null);
+function regionCompatible(a, b, now) {
+  if (!a.region || !b.region || a.region === b.region) return true;
+  return now - a.joinedAt >= REGION_RELAX_MS && now - b.joinedAt >= REGION_RELAX_MS;
+}
+
+export function joinQueue({ scopedId, socketId, topics, locationScope, location, gender, genderPref, squadOk, card, region }) {
   // A repeat join (the client can join from the home page AND from the room for one
   // click, or re-join after a reconnect) must NOT restart the person's wait: every
   // wait-based rule (widening, rematch after 45s, the demo fallback) is measured from
@@ -64,6 +85,7 @@ export function joinQueue({ scopedId, socketId, topics, locationScope, location,
     // call send it, and never with a gender preference (that was paid for a 1:1 match).
     squadOk: !!squadOk && !genderPref,
     card: card ?? null, // { name, city, state }: shown to whoever they're matched with (profile.publicCard)
+    region: region ?? null, // "south-asia", "north-america"… (regionOf); null = anywhere
     joinedAt,
   });
 }
@@ -202,13 +224,15 @@ export function findMatchFor(entry, candidates, blockedPairs, recentPairs) {
     if (candidate.scopedId === entry.scopedId) continue;
     if (!locationCompatible(entry, candidate, now)) continue;
     if (!genderCompatible(entry, candidate)) continue;
+    if (!regionCompatible(entry, candidate, now)) continue;
     const key = pairKey(entry.scopedId, candidate.scopedId);
     if (blockedPairs.has(key)) continue;
     const recent = recentPairs.has(key);
     if (recent && !(now - entry.joinedAt >= RECENT_RELAX_MS && now - candidate.joinedAt >= RECENT_RELAX_MS)) continue;
 
     // A recent partner only wins if nobody fresh is available.
-    const score = topicOverlapScore(entry, candidate) - (recent ? 1000 : 0);
+    // Someone from the same region wins over someone from elsewhere (after the wait, both qualify).
+    const score = topicOverlapScore(entry, candidate) - (recent ? 1000 : 0) + (entry.region && entry.region === candidate.region ? 100 : 0);
     if (score > bestScore) {
       best = candidate;
       bestScore = score;
