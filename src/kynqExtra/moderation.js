@@ -18,7 +18,10 @@
 //                     · the call ends for both, each told why (mod:action)
 //                     · self-detected, or peer-detected and corroborated (their own camera also
 //                       scored >= MEDIUM in this call, or a second person confirmed them within
-//                       24 h): a strike → locked out 24 h, then 7 days, then permanently
+//                       24 h): a strike → locked out 24 h, then 7 days, then permanently —
+//                       but only if every evidence frame scored Porn >= PORN_LOCK. Below that
+//                       (PORN_EVIDENCE..PORN_LOCK) the first time is a WARNING only (call ends,
+//                       no lockout); a second warning within WARNING_WINDOW_MS becomes a strike
 //                     · peer-detected only: no lockout at all (one viewer's device can't get
 //                       anyone locked out); kept for review
 //   MEDIUM..HIGH  → logged (the watcher's device already blurred it)
@@ -26,6 +29,8 @@
 // History: the first version acted on ONE frame scored Porn+Hentai >= 0.7 by the same model the
 // device runs, and a viewer-only report locked people out for 1 h. In its first days it locked out
 // thousands of users, most by a single borderline frame (0.7–0.9) — far too many false bans.
+// Second tuning (24 Nov 2026): at PORN_EVIDENCE alone, ~13 people a day were locked out and every
+// one appealed; 78 of 91 lockouts in a week had a frame scoring under 0.97. Those now get a warning.
 // Frames are kept 7 days for review, then deleted automatically (TTL index).
 import crypto from "node:crypto";
 import { Worker } from "node:worker_threads";
@@ -34,6 +39,8 @@ import mongoose from "mongoose";
 export const NSFW_HIGH = 0.92;
 export const NSFW_MEDIUM = 0.75;
 export const PORN_EVIDENCE = 0.92;
+export const PORN_LOCK = 0.97;
+const WARNING_WINDOW_MS = 7 * 24 * 3_600_000;
 export const FRAMES_TO_ACT = 2;
 export const EVIDENCE_SPAN_MS = 3000;
 const HOUR = 3_600_000;
@@ -52,6 +59,8 @@ export function ensureModerationIndexes() {
     col("moderation_events").createIndex({ subject: 1, at: -1 }),
     col("moderation_events").createIndex({ callId: 1 }),
     col("moderation_strikes").createIndex({ userId: 1, at: -1 }),
+    col("moderation_warnings").createIndex({ userId: 1, at: -1 }),
+    col("moderation_warnings").createIndex({ expireAt: 1 }, { expireAfterSeconds: 0 }),
   ]).catch((err) => { indexesReady = null; console.error("[moderation] index creation failed:", err.message); });
   return indexesReady;
 }
@@ -167,7 +176,7 @@ export async function handleScore({ socket, scopedId, payload, endForModeration,
 
   // One frame is never enough: wait for FRAMES_TO_ACT evidence frames of this person in this call,
   // spread over at least EVIDENCE_SPAN_MS (the watcher's device keeps it hidden meanwhile).
-  const evidence = await col("moderation_events").find({ subject, callId, level: "high", confirmed: true }, { projection: { at: 1 } }).sort({ at: 1 }).toArray();
+  const evidence = await col("moderation_events").find({ subject, callId, level: "high", confirmed: true }, { projection: { at: 1, "serverScores.Porn": 1 } }).sort({ at: 1 }).toArray();
   if (evidence.length < FRAMES_TO_ACT || now - evidence[0].at < EVIDENCE_SPAN_MS) {
     await col("moderation_events").updateOne({ _id: id }, { $set: { action: "evidence_pending" } });
     return { ok: true, confirmed: true, pending: true };
@@ -180,6 +189,17 @@ export async function handleScore({ socket, scopedId, payload, endForModeration,
   setTimeout(() => actedOn.delete(key), 10 * 60_000).unref?.();
   await endForModeration(callId, subject).catch((err) => console.error("[moderation] end call failed:", err.message));
   const strong = kind === "self" || (await selfFlaggedInCall(subject, callId)) || (await otherConfirmedReporter(subject, scopedId));
+  // Only near-certain frames lock someone out the first time; borderline ones warn first.
+  const certain = evidence.every((e) => (Number(e.serverScores?.Porn) || 0) >= PORN_LOCK);
+  if (strong && !certain) {
+    const warned = await col("moderation_warnings").countDocuments({ userId: subject, at: { $gte: now - WARNING_WINDOW_MS } });
+    await col("moderation_warnings").insertOne({ userId: subject, at: now, expireAt: new Date(now + WARNING_WINDOW_MS), eventId: id, callId });
+    if (warned === 0) {
+      await col("moderation_events").updateOne({ _id: id }, { $set: { action: "warned" } });
+      console.log(`[moderation] warned userId=${subject} (borderline evidence, no lockout)`);
+      return { ok: true, confirmed: true };
+    }
+  }
   if (strong) {
     const prior = await strikesOf(subject);
     const ms = STRIKE_LADDER_MS[Math.min(prior, STRIKE_LADDER_MS.length - 1)];

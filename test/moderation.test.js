@@ -14,7 +14,9 @@ const C = (n) => mongoose.connection.collection(n);
 const HOUR = 3_600_000;
 let mod, session;
 
-const EXPLICIT = { Drawing: 0, Hentai: 0.01, Neutral: 0.01, Porn: 0.96, Sexy: 0.02 };
+const EXPLICIT = { Drawing: 0, Hentai: 0.01, Neutral: 0.01, Porn: 0.98, Sexy: 0.02 };
+// Over the evidence bar but not near-certain: warns first, locks out only on a repeat.
+const UNSURE = { Drawing: 0, Hentai: 0.02, Neutral: 0.02, Porn: 0.94, Sexy: 0.02 };
 // What wrongly banned people in production: one model's borderline call (skin, shirtless, close-up).
 const BORDERLINE = { Drawing: 0, Hentai: 0.04, Neutral: 0.04, Porn: 0.88, Sexy: 0.04 };
 const LIKELY = { Drawing: 0, Hentai: 0.1, Neutral: 0.1, Porn: 0.7, Sexy: 0.1 };
@@ -130,6 +132,21 @@ test("seen by one viewer only: call ends, nobody is locked out, kept for review;
   await twice(call("u_victim2", "u_flasher"), { kind: "peer", scores: EXPLICIT, frame: FRAME });
   u = await user("u_flasher");
   assert.equal(await C("moderation_strikes").countDocuments({ userId: "u_flasher" }), 1, "second viewer → strike");
+  assert.ok(u.kynqExtraRestrictedUntil >= Date.now() + 24 * HOUR - 10_000, "24 h");
+});
+
+test("unsure evidence: first time the call ends with a warning only; a repeat within 7 days is a strike", db, async () => {
+  await C("users").insertOne({ id: "u_unsure", email: "un@t.local", name: "un" });
+  const one = await twice(call("u_unsure", "u_victim"), { kind: "self", scores: EXPLICIT, frame: FRAME, server: UNSURE });
+  assert.deepEqual(one.ended.map((e) => e.offender), ["u_unsure"], "the call still ends");
+  let u = await user("u_unsure");
+  assert.equal(session.isLockedOut(u), false, "no lockout on a first borderline call");
+  assert.equal(await C("moderation_strikes").countDocuments({ userId: "u_unsure" }), 0);
+  assert.equal(await C("moderation_events").countDocuments({ subject: "u_unsure", action: "warned" }), 1);
+
+  await twice(call("u_unsure", "u_victim2"), { kind: "self", scores: EXPLICIT, frame: FRAME, server: UNSURE });
+  u = await user("u_unsure");
+  assert.equal(await C("moderation_strikes").countDocuments({ userId: "u_unsure" }), 1, "second warning → strike");
   assert.ok(u.kynqExtraRestrictedUntil >= Date.now() + 24 * HOUR - 10_000, "24 h");
 });
 
