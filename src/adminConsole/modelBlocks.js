@@ -5,7 +5,7 @@
 import { col, pageParams, usersById, displayName, maskEmail } from "./util.js";
 import { logAudit } from "./audit.js";
 
-const ACTIONS = ["locked_24h", "locked_168h", "banned", "cooldown_1h", "ended_peer_only", "warned"];
+const ACTIONS = ["locked_24h", "locked_168h", "banned", "cooldown_1h", "ended_peer_only"];
 const MODEL_REASONS = ["nudity", "nudity_reported"];
 const VIEWS = ["blocked", "recent"];
 
